@@ -1,6 +1,6 @@
 import { json as jsonLang } from "@codemirror/lang-json";
 import type { ViewUpdate } from "@codemirror/view";
-import { CheckIcon, ClipboardIcon } from "@heroicons/react/20/solid";
+import { CheckIcon, ClipboardIcon, TrashIcon } from "@heroicons/react/20/solid";
 import type { ReactCodeMirrorProps, UseCodeMirror } from "@uiw/react-codemirror";
 import { useCodeMirror } from "@uiw/react-codemirror";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -107,46 +107,59 @@ export function JSONEditor(opts: JSONEditorProps) {
     }, 1500);
   }, [view]);
 
+  const showButtons = showClearButton || showCopyButton;
+
   return (
-    <div className={cn(opts.className, "relative")}>
+    <div
+      className={cn(
+        "grid",
+        showButtons ? "grid-rows-[2.5rem_1fr]" : "grid-rows-[1fr]",
+        opts.className
+      )}
+    >
+      {showButtons && (
+        <div className="mx-3 flex items-center justify-end gap-2 border-b border-grid-dimmed">
+          {showClearButton && (
+            <Button
+              type="button"
+              variant="minimal/small"
+              TrailingIcon={TrashIcon}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                clear();
+              }}
+            >
+              Clear
+            </Button>
+          )}
+          {showCopyButton && (
+            <Button
+              type="button"
+              variant="minimal/small"
+              TrailingIcon={copied ? CheckIcon : ClipboardIcon}
+              trailingIconClassName={
+                copied ? "text-green-500 group-hover:text-green-500" : undefined
+              }
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                copy();
+              }}
+            >
+              Copy
+            </Button>
+          )}
+        </div>
+      )}
       <div
-        className="h-full w-full"
+        className="w-full overflow-auto"
         ref={editor}
         onBlur={() => {
           if (!onBlur) return;
           onBlur(editor.current?.textContent ?? "");
         }}
       />
-      <div className="absolute right-3 top-3 flex items-center gap-2">
-        {showClearButton && (
-          <Button
-            type="button"
-            variant="secondary/small"
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              clear();
-            }}
-          >
-            Clear
-          </Button>
-        )}
-        {showCopyButton && (
-          <Button
-            type="button"
-            variant="secondary/small"
-            LeadingIcon={copied ? CheckIcon : ClipboardIcon}
-            leadingIconClassName={copied ? "text-green-500 group-hover:text-green-500" : undefined}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              copy();
-            }}
-          >
-            Copy
-          </Button>
-        )}
-      </div>
     </div>
   );
 }

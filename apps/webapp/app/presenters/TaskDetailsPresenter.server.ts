@@ -1,6 +1,5 @@
-import { RedactSchema } from "@trigger.dev/core";
-import { StyleSchema } from "@trigger.dev/core";
-import { PrismaClient, prisma } from "~/db.server";
+import { RedactSchema, StyleSchema } from "@trigger.dev/core";
+import { $replica, PrismaClient, prisma } from "~/db.server";
 import { mergeProperties } from "~/utils/mergeProperties.server";
 import { Redactor } from "~/utils/redactor";
 
@@ -17,7 +16,7 @@ export class TaskDetailsPresenter {
   }
 
   public async call({ id, userId }: DetailsProps) {
-    const task = await this.#prismaClient.task.findFirst({
+    const task = await $replica.task.findFirst({
       select: {
         id: true,
         displayKey: true,
@@ -58,6 +57,7 @@ export class TaskDetailsPresenter {
         outputProperties: true,
         params: true,
         output: true,
+        outputIsUndefined: true,
         error: true,
         startedAt: true,
         completedAt: true,
@@ -89,9 +89,11 @@ export class TaskDetailsPresenter {
     return {
       ...task,
       redact: undefined,
-      output: task.output
-        ? JSON.stringify(this.#stringifyOutputWithRedactions(task.output, task.redact), null, 2)
-        : undefined,
+      output: JSON.stringify(
+        this.#stringifyOutputWithRedactions(task.output, task.redact),
+        null,
+        2
+      ),
       connection: task.runConnection,
       params: task.params as Record<string, any>,
       properties: mergeProperties(task.properties, task.outputProperties),
@@ -101,7 +103,7 @@ export class TaskDetailsPresenter {
 
   #stringifyOutputWithRedactions(output: any, redact: unknown): any {
     if (!output) {
-      return;
+      return output;
     }
 
     const parsedRedact = RedactSchema.safeParse(redact);

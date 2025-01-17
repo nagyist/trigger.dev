@@ -1,13 +1,14 @@
 import {
-  RuntimeEnvironmentType,
   type ConnectionType,
   type Integration,
   type IntegrationConnection,
 } from "@trigger.dev/database";
 import type { PrismaClient, PrismaClientOrTransaction } from "~/db.server";
 import { prisma } from "~/db.server";
-import { enqueueRunExecutionV2 } from "~/models/jobRunExecution.server";
+import { autoIncrementCounter } from "../autoIncrementCounter.server";
+import { logger } from "../logger.server";
 import { workerQueue } from "../worker.server";
+import { ResumeRunService } from "./resumeRun.server";
 
 type FoundRun = NonNullable<Awaited<ReturnType<typeof findRun>>>;
 type RunConnectionsByKey = Awaited<ReturnType<typeof createRunConnections>>;
@@ -36,6 +37,13 @@ export class StartRunService {
   }
 
   #runIsStartable(run: FoundRun) {
+    if (!run.organization.runsEnabled) {
+      logger.debug("StartRunService: Runs are disabled for this organization", {
+        organizationId: run.organization.id,
+      });
+      return false;
+    }
+
     const startableStatuses = ["PENDING", "WAITING_ON_CONNECTIONS"] as const;
     return startableStatuses.includes(run.status);
   }
@@ -60,22 +68,13 @@ export class StartRunService {
       )
       .filter(Boolean);
 
-    const updateRun = async () => {
-      if (run.preprocess) {
-        // Start the jobRun and increment the jobCount
-        return await this.#prismaClient.jobRun.update({
+    await autoIncrementCounter.incrementInTransaction(
+      `v2-run:${run.jobId}`,
+      async (num, tx) => {
+        const updatedRun = await tx.jobRun.update({
           where: { id },
           data: {
-            status: "PREPROCESSING",
-            runConnections: {
-              create: createRunConnections,
-            },
-          },
-        });
-      } else {
-        return await this.#prismaClient.jobRun.update({
-          where: { id },
-          data: {
+            number: num,
             status: "QUEUED",
             queuedAt: new Date(),
             runConnections: {
@@ -83,14 +82,20 @@ export class StartRunService {
             },
           },
         });
-      }
-    };
 
-    const updatedRun = await updateRun();
+        await ResumeRunService.enqueue(updatedRun, tx);
+      },
+      async (_, tx) => {
+        const counter = await tx.jobCounter.findUnique({
+          where: { jobId: run.jobId },
+          select: { lastNumber: true },
+        });
 
-    await enqueueRunExecutionV2(updatedRun, this.#prismaClient, {
-      skipRetrying: run.environment.type === RuntimeEnvironmentType.DEVELOPMENT,
-    });
+        return counter?.lastNumber;
+      },
+      this.#prismaClient,
+      { timeout: 10_000 }
+    );
   }
 
   async #handleMissingConnections(id: string, runConnectionsByKey: RunConnectionsByKey) {
@@ -148,6 +153,7 @@ async function findRun(tx: PrismaClientOrTransaction, id: string) {
     include: {
       queue: true,
       environment: true,
+      organization: true,
       version: {
         include: {
           integrations: {

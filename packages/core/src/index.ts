@@ -1,35 +1,9 @@
-export * from "./logger";
-export * from "./schemas";
-export * from "./types";
-export * from "./utils";
-export * from "./retry";
-export * from "./replacements";
-export * from "./searchParams";
-export * from "./eventFilterMatches";
-export * from "./bloom";
-
-export const API_VERSIONS = {
-  LAZY_LOADED_CACHED_TASKS: "2023-09-29",
-} as const;
-
-export const PLATFORM_FEATURES = {
-  yieldExecution: API_VERSIONS.LAZY_LOADED_CACHED_TASKS,
-  lazyLoadedCachedTasks: API_VERSIONS.LAZY_LOADED_CACHED_TASKS,
-};
-
-export function supportsFeature<TFeatureName extends keyof typeof PLATFORM_FEATURES>(
-  featureName: TFeatureName,
-  version: string
-): boolean {
-  if (version === "unversioned" || version === "unknown") {
-    return false;
-  }
-
-  const supportedVersion = PLATFORM_FEATURES[featureName];
-
-  if (!supportedVersion) {
-    return false;
-  }
-
-  return version >= supportedVersion;
-}
+export * from "./schemas/index.js";
+export * from "./types.js";
+export * from "./utils.js";
+export * from "./retry.js";
+export * from "./replacements.js";
+export * from "./searchParams.js";
+export * from "./eventFilterMatches.js";
+export * from "./requestFilterMatches.js";
+export * from "./versions.js";

@@ -1,11 +1,14 @@
 import { conform, useForm } from "@conform-to/react";
 import { parse } from "@conform-to/zod";
-import type { ActionFunction } from "@remix-run/node";
-import { json } from "@remix-run/node";
-import { Form, useActionData } from "@remix-run/react";
+import { RadioGroup } from "@radix-ui/react-radio-group";
+import type { ActionFunction, LoaderFunctionArgs } from "@remix-run/node";
+import { json, redirect } from "@remix-run/node";
+import { Form, useActionData, useNavigation } from "@remix-run/react";
+import { uiComponent } from "@team-plain/typescript-sdk";
+import { typedjson, useTypedLoaderData } from "remix-typedjson";
 import { z } from "zod";
 import { MainCenteredContainer } from "~/components/layout/AppLayout";
-import { Button } from "~/components/primitives/Buttons";
+import { Button, LinkButton } from "~/components/primitives/Buttons";
 import { Fieldset } from "~/components/primitives/Fieldset";
 import { FormButtons } from "~/components/primitives/FormButtons";
 import { FormError } from "~/components/primitives/FormError";
@@ -14,19 +17,34 @@ import { Hint } from "~/components/primitives/Hint";
 import { Input } from "~/components/primitives/Input";
 import { InputGroup } from "~/components/primitives/InputGroup";
 import { Label } from "~/components/primitives/Label";
-import { redirectWithSuccessMessage } from "~/models/message.server";
+import { RadioGroupItem } from "~/components/primitives/RadioButton";
+import { TextArea } from "~/components/primitives/TextArea";
+import { useFeatures } from "~/hooks/useFeatures";
 import { createOrganization } from "~/models/organization.server";
-import { requireUserId } from "~/services/session.server";
-import { projectPath } from "~/utils/pathBuilder";
+import { NewOrganizationPresenter } from "~/presenters/NewOrganizationPresenter.server";
+import { logger } from "~/services/logger.server";
+import { requireUser, requireUserId } from "~/services/session.server";
+import { organizationPath, rootPath } from "~/utils/pathBuilder";
+import { sendToPlain } from "~/utils/plain.server";
 
 const schema = z.object({
   orgName: z.string().min(3).max(50),
-  projectName: z.string().min(3).max(50),
+  companySize: z.string().optional(),
+  whyUseUs: z.string().optional(),
 });
 
-export const action: ActionFunction = async ({ request }) => {
+export const loader = async ({ request }: LoaderFunctionArgs) => {
   const userId = await requireUserId(request);
+  const presenter = new NewOrganizationPresenter();
+  const { hasOrganizations } = await presenter.call({ userId: userId });
 
+  return typedjson({
+    hasOrganizations,
+  });
+};
+
+export const action: ActionFunction = async ({ request }) => {
+  const user = await requireUser(request);
   const formData = await request.formData();
   const submission = parse(formData, { schema });
 
@@ -37,68 +55,143 @@ export const action: ActionFunction = async ({ request }) => {
   try {
     const organization = await createOrganization({
       title: submission.value.orgName,
-      userId,
-      projectName: submission.value.projectName,
+      userId: user.id,
+      companySize: submission.value.companySize ?? null,
     });
 
-    return redirectWithSuccessMessage(
-      projectPath(organization, organization.projects[0]),
-      request,
-      `${submission.value.orgName} created`
-    );
+    const whyUseUs = formData.get("whyUseUs");
+
+    if (whyUseUs) {
+      try {
+        await sendToPlain({
+          userId: user.id,
+          email: user.email,
+          name: user.name ?? user.displayName ?? user.email,
+          title: "New org feedback",
+          components: [
+            uiComponent.text({
+              text: `${submission.value.orgName} just created a new organization.`,
+            }),
+            uiComponent.divider({ spacingSize: "M" }),
+            uiComponent.text({
+              size: "L",
+              color: "NORMAL",
+              text: "What problem are you trying to solve?",
+            }),
+            uiComponent.text({
+              size: "L",
+              color: "NORMAL",
+              text: whyUseUs.toString(),
+            }),
+          ],
+        });
+      } catch (error) {
+        logger.error("Error sending data to Plain when creating an org:", { error });
+      }
+    }
+
+    return redirect(organizationPath(organization));
   } catch (error: any) {
     return json({ errors: { body: error.message } }, { status: 400 });
   }
 };
 
 export default function NewOrganizationPage() {
+  const { hasOrganizations } = useTypedLoaderData<typeof loader>();
   const lastSubmission = useActionData();
+  const { isManagedCloud } = useFeatures();
+  const navigation = useNavigation();
 
-  const [form, { orgName, projectName }] = useForm({
+  const [form, { orgName }] = useForm({
     id: "create-organization",
-    lastSubmission,
+    // TODO: type this
+    lastSubmission: lastSubmission as any,
     onValidate({ formData }) {
       return parse(formData, { schema });
     },
+    shouldRevalidate: "onSubmit",
+    shouldValidate: "onSubmit",
   });
 
-  return (
-    <MainCenteredContainer>
-      <div>
-        <FormTitle LeadingIcon="organization" title="Create a new Organization" />
-        <Form method="post" {...form.props}>
-          <Fieldset>
-            <InputGroup>
-              <Label htmlFor={orgName.id}>Organization name</Label>
-              <Input
-                {...conform.input(orgName, { type: "text" })}
-                placeholder="Your Organization name"
-                icon="organization"
-              />
-              <Hint>E.g. your company name or your workspace name.</Hint>
-              <FormError id={orgName.errorId}>{orgName.error}</FormError>
-            </InputGroup>
-            <InputGroup>
-              <Label htmlFor={projectName.id}>Project name</Label>
-              <Input
-                {...conform.input(projectName, { type: "text" })}
-                placeholder="Your Project name"
-                icon="folder"
-              />
-              <Hint>Your Jobs will live inside this Project.</Hint>
-              <FormError id={projectName.errorId}>{projectName.error}</FormError>
-            </InputGroup>
+  const isLoading = navigation.state === "submitting" || navigation.state === "loading";
 
-            <FormButtons
-              confirmButton={
-                <Button type="submit" variant={"primary/small"} TrailingIcon="arrow-right">
-                  Create
-                </Button>
-              }
+  return (
+    <MainCenteredContainer className="max-w-[22rem]">
+      <FormTitle LeadingIcon="organization" title="Create an Organization" />
+      <Form method="post" {...form.props}>
+        <Fieldset>
+          <InputGroup>
+            <Label htmlFor={orgName.id}>Organization name</Label>
+            <Input
+              {...conform.input(orgName, { type: "text" })}
+              placeholder="Your Organization name"
+              icon="organization"
+              autoFocus
             />
-          </Fieldset>
-        </Form>
-      </div>
+            <Hint>E.g. your company name or your workspace name.</Hint>
+            <FormError id={orgName.errorId}>{orgName.error}</FormError>
+          </InputGroup>
+          {isManagedCloud && (
+            <>
+              <InputGroup>
+                <Label htmlFor={"companySize"}>Number of employees</Label>
+                <RadioGroup name="companySize" className="flex items-center justify-between gap-2">
+                  <RadioGroupItem
+                    id="employees-1-5"
+                    label="1-5"
+                    value={"1-5"}
+                    variant="button/small"
+                    className="grow"
+                  />
+                  <RadioGroupItem
+                    id="employees-6-49"
+                    label="6-49"
+                    value={"6-49"}
+                    variant="button/small"
+                    className="grow"
+                  />
+                  <RadioGroupItem
+                    id="employees-50-99"
+                    label="50-99"
+                    value={"50-99"}
+                    variant="button/small"
+                    className="grow"
+                  />
+                  <RadioGroupItem
+                    id="employees-100+"
+                    label="100+"
+                    value={"100+"}
+                    variant="button/small"
+                    className="grow"
+                  />
+                </RadioGroup>
+              </InputGroup>
+              <InputGroup>
+                <Label htmlFor={"whyUseUs"}>What problem are you trying to solve?</Label>
+                <TextArea name="whyUseUs" rows={4} spellCheck={false} />
+                <Hint>
+                  Your answer will help us understand your use case and provide better support.
+                </Hint>
+              </InputGroup>
+            </>
+          )}
+
+          <FormButtons
+            confirmButton={
+              <Button type="submit" variant={"primary/small"} disabled={isLoading}>
+                Create
+              </Button>
+            }
+            cancelButton={
+              hasOrganizations ? (
+                <LinkButton to={rootPath()} variant={"tertiary/small"}>
+                  Cancel
+                </LinkButton>
+              ) : null
+            }
+          />
+        </Fieldset>
+      </Form>
     </MainCenteredContainer>
   );
 }

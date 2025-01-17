@@ -2,9 +2,12 @@ import { Job } from "@trigger.dev/database";
 import { TriggerClient } from "@trigger.dev/sdk";
 import { PostHog } from "posthog-node";
 import { env } from "~/env.server";
+import { MatchedOrganization } from "~/hooks/useOrganizations";
 import type { Organization } from "~/models/organization.server";
 import type { Project } from "~/models/project.server";
 import type { User } from "~/models/user.server";
+import { singleton } from "~/utils/singleton";
+import { loopsClient } from "./loops.server";
 
 type Options = {
   postHogApiKey?: string;
@@ -19,8 +22,13 @@ class Telemetry {
   #triggerClient: TriggerClient | undefined = undefined;
 
   constructor({ postHogApiKey, trigger }: Options) {
+    if (env.TRIGGER_TELEMETRY_DISABLED !== undefined) {
+      console.log("📉 Telemetry disabled");
+      return;
+    }
+
     if (postHogApiKey) {
-      this.#posthogClient = new PostHog(postHogApiKey, { host: "https://app.posthog.com" });
+      this.#posthogClient = new PostHog(postHogApiKey, { host: "https://eu.posthog.com" });
     } else {
       console.log("No PostHog API key, so analytics won't track");
     }
@@ -37,18 +45,19 @@ class Telemetry {
 
   user = {
     identify: ({ user, isNewUser }: { user: User; isNewUser: boolean }) => {
-      if (this.#posthogClient === undefined) return;
-      this.#posthogClient.identify({
-        distinctId: user.id,
-        properties: {
-          email: user.email,
-          name: user.name,
-          authenticationMethod: user.authenticationMethod,
-          admin: user.admin,
-          createdAt: user.createdAt,
-          isNewUser,
-        },
-      });
+      if (this.#posthogClient) {
+        this.#posthogClient.identify({
+          distinctId: user.id,
+          properties: {
+            email: user.email,
+            name: user.name,
+            authenticationMethod: user.authenticationMethod,
+            admin: user.admin,
+            createdAt: user.createdAt,
+            isNewUser,
+          },
+        });
+      }
       if (isNewUser) {
         this.#capture({
           userId: user.id,
@@ -62,6 +71,12 @@ class Telemetry {
           },
         });
 
+        loopsClient?.userCreated({
+          userId: user.id,
+          email: user.email,
+          name: user.name,
+        });
+
         this.#triggerClient?.sendEvent({
           name: "user.created",
           payload: {
@@ -73,7 +88,7 @@ class Telemetry {
   };
 
   organization = {
-    identify: ({ organization }: { organization: Organization }) => {
+    identify: ({ organization }: { organization: MatchedOrganization }) => {
       if (this.#posthogClient === undefined) return;
       this.#posthogClient.groupIdentify({
         groupType: "organization",
@@ -81,8 +96,6 @@ class Telemetry {
         properties: {
           name: organization.title,
           slug: organization.slug,
-          createdAt: organization.createdAt,
-          updatedAt: organization.updatedAt,
         },
       });
     },
@@ -115,7 +128,11 @@ class Telemetry {
   };
 
   project = {
-    identify: ({ project }: { project: Project }) => {
+    identify: ({
+      project,
+    }: {
+      project: Pick<Project, "id" | "name" | "createdAt" | "updatedAt">;
+    }) => {
       if (this.#posthogClient === undefined) return;
       this.#posthogClient.groupIdentify({
         groupType: "project",
@@ -236,13 +253,17 @@ type CaptureEvent = {
   userOnceProperties?: Record<string, any>;
 };
 
-export const telemetry = new Telemetry({
-  postHogApiKey: env.POSTHOG_PROJECT_KEY,
-  trigger:
-    env.TELEMETRY_TRIGGER_API_KEY && env.TELEMETRY_TRIGGER_API_URL
-      ? {
-          apiKey: env.TELEMETRY_TRIGGER_API_KEY,
-          apiUrl: env.TELEMETRY_TRIGGER_API_URL,
-        }
-      : undefined,
-});
+export const telemetry = singleton(
+  "telemetry",
+  () =>
+    new Telemetry({
+      postHogApiKey: env.POSTHOG_PROJECT_KEY,
+      trigger:
+        env.TELEMETRY_TRIGGER_API_KEY && env.TELEMETRY_TRIGGER_API_URL
+          ? {
+              apiKey: env.TELEMETRY_TRIGGER_API_KEY,
+              apiUrl: env.TELEMETRY_TRIGGER_API_URL,
+            }
+          : undefined,
+    })
+);

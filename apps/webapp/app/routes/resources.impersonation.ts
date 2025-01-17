@@ -1,13 +1,6 @@
-import type { ActionArgs } from "@remix-run/server-runtime";
-import { redirect } from "remix-typedjson";
-import { clearImpersonationId, commitImpersonationSession } from "~/services/impersonation.server";
+import type { ActionFunctionArgs } from "@remix-run/server-runtime";
+import { clearImpersonation } from "~/models/admin.server";
 
-export async function action({ request }: ActionArgs) {
-  const session = await clearImpersonationId(request);
-
-  return redirect("/admin", {
-    headers: {
-      "Set-Cookie": await commitImpersonationSession(session),
-    },
-  });
+export async function action({ request }: ActionFunctionArgs) {
+  return clearImpersonation(request, "/admin");
 }

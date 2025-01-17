@@ -10,7 +10,7 @@ import { ApiAuthenticationMethodOAuth2, Integration, Scope } from "~/services/ex
 import { cn } from "~/utils/cn";
 import { CodeBlock } from "../code/CodeBlock";
 import { Button } from "../primitives/Buttons";
-import { Checkbox } from "../primitives/Checkbox";
+import { CheckboxWithLabel } from "../primitives/Checkbox";
 import { Fieldset } from "../primitives/Fieldset";
 import { FormError } from "../primitives/FormError";
 import { Header2, Header3 } from "../primitives/Headers";
@@ -45,7 +45,8 @@ export function UpdateOAuthForm({
   const { isManagedCloud } = useFeatures();
 
   const [form, { title, scopes, hasCustomClient, customClientId, customClientSecret }] = useForm({
-    lastSubmission: fetcher.data,
+    // TODO: type this
+    lastSubmission: fetcher.data as any,
     onValidate({ formData }) {
       return parse(formData, {
         schema,
@@ -112,11 +113,11 @@ export function UpdateOAuthForm({
           <Paragraph variant="small" className="mb-2">
             To use your own OAuth app, check the option below and insert the details.
           </Paragraph>
-          <Checkbox
+          <CheckboxWithLabel
             id="hasCustomClient"
             label="Use my OAuth App"
             variant="simple/small"
-            disabled={requiresCustomOAuthApp}
+            readOnly={requiresCustomOAuthApp}
             onChange={(checked) => setUseMyOAuthApp(checked)}
             {...conform.input(hasCustomClient, { type: "checkbox" })}
             defaultChecked={requiresCustomOAuthApp}
@@ -167,7 +168,7 @@ export function UpdateOAuthForm({
                 </fieldset> */}
             <div className="mb-2 mt-4 flex items-center justify-between">
               <Header3>Select {integration.name} scopes</Header3>
-              <Paragraph variant="small" className="text-slate-500">
+              <Paragraph variant="small" className="text-charcoal-500">
                 {simplur`${selectedScopes.size} scope[|s] selected`}
               </Paragraph>
             </div>
@@ -188,7 +189,7 @@ export function UpdateOAuthForm({
               )}
               {authMethod.scopes.map((s) => {
                 return (
-                  <Checkbox
+                  <CheckboxWithLabel
                     key={s.name}
                     id={s.name}
                     value={s.name}
@@ -220,7 +221,7 @@ export function UpdateOAuthForm({
         )}
       </Fieldset>
 
-      <div className="absolute bottom-0 left-0 flex w-full items-center justify-end gap-x-4 rounded-b-md border-t border-slate-800 bg-midnight-900 p-4">
+      <div className="absolute bottom-0 left-0 flex w-full items-center justify-end gap-x-4 rounded-b-md border-t border-charcoal-800 bg-background-dimmed p-4">
         <FormError>{scopes.error}</FormError>
         <Button
           type="submit"
@@ -229,7 +230,7 @@ export function UpdateOAuthForm({
           variant="primary/medium"
           LeadingIcon={integration.identifier}
         >
-          Connect to {integration.name}
+          {`Connect to ${integration.name}`}
         </Button>
       </div>
     </fetcher.Form>

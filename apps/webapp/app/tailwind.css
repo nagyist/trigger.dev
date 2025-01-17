@@ -1,19 +1,41 @@
-@import url("https://fonts.googleapis.com/css2?family=Inter:wght@100;200;300;400;500;600;700;800;900&family=Roboto+Mono:wght@300;400;500;600;700&display=swap&family=Poppins:wght@600&display=swap");
+@import url("non.geist");
+@import url("non.geist/mono");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-body {
-  color: white;
-}
-
 @layer base {
   * {
-    @apply border-border;
+    @apply border-grid-bright;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background-dimmed text-text-dimmed;
     font-feature-settings: "rlig" 1, "calt" 1;
+  }
+
+  /* Text selection styles */
+  ::selection {
+    @apply bg-text-bright/30 text-text-bright;
+  }
+  ::-moz-selection {
+    @apply bg-text-bright/30 text-text-bright;
+  }
+  
+  /* shadcn charts: https://ui.shadcn.com/docs/components/chart#add-a-grid */
+  :root {
+    --chart-1: 12 76% 61%;
+    --chart-2: 173 58% 39%;
+    --chart-3: 197 37% 24%;
+    --chart-4: 43 74% 66%;
+    --chart-5: 27 87% 67%;
+  }
+ 
+  .dark {
+    --chart-1: 220 70% 50%;
+    --chart-2: 160 60% 45%;
+    --chart-3: 30 80% 55%;
+    --chart-4: 280 65% 60%;
+    --chart-5: 340 75% 55%;
   }
 }

@@ -1,7 +1,11 @@
+import { HomeIcon } from "@heroicons/react/20/solid";
 import { isRouteErrorResponse, useRouteError } from "@remix-run/react";
-import { LinkButton } from "./primitives/Buttons";
-import { Header1, Header3 } from "./primitives/Headers";
+import { motion } from "framer-motion";
 import { friendlyErrorDisplay } from "~/utils/httpErrors";
+import { LinkButton } from "./primitives/Buttons";
+import { Header1 } from "./primitives/Headers";
+import { Paragraph } from "./primitives/Paragraph";
+import Spline from "@splinetool/react-spline";
 
 type ErrorDisplayOptions = {
   button?: {
@@ -39,12 +43,27 @@ type DisplayOptionsProps = {
 
 export function ErrorDisplay({ title, message, button }: DisplayOptionsProps) {
   return (
-    <div className="p-4">
-      <Header1 className="mb-4 border-b border-slate-800 pb-4">{title}</Header1>
-      {message && <Header3>{message}</Header3>}
-      <LinkButton to={button ? button.to : "/"} variant="primary/medium" className="mt-8">
-        {button ? button.title : "Home"}
-      </LinkButton>
+    <div className="relative flex min-h-screen flex-col items-center justify-center bg-[#16181C]">
+      <div className="z-10 mt-[30vh] flex flex-col items-center gap-8">
+        <Header1>{title}</Header1>
+        {message && <Paragraph>{message}</Paragraph>}
+        <LinkButton
+          to={button ? button.to : "/"}
+          shortcut={{ modifiers: ["mod"], key: "g" }}
+          variant="primary/medium"
+          LeadingIcon={HomeIcon}
+        >
+          {button ? button.title : "Go to homepage"}
+        </LinkButton>
+      </div>
+      <motion.div
+        className="pointer-events-none absolute inset-0 overflow-hidden"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.5, duration: 2, ease: "easeOut" }}
+      >
+        <Spline scene="https://prod.spline.design/wRly8TZN-e0Twb8W/scene.splinecode" />
+      </motion.div>
     </div>
   );
 }

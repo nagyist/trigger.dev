@@ -1,14 +1,15 @@
 "use client";
 
-import * as React from "react";
-import * as PopoverPrimitive from "@radix-ui/react-popover";
-import { cn } from "~/utils/cn";
-import { Paragraph } from "./Paragraph";
 import { ChevronDownIcon, EllipsisVerticalIcon } from "@heroicons/react/24/solid";
-import { LinkButton } from "./Buttons";
+import * as PopoverPrimitive from "@radix-ui/react-popover";
+import * as React from "react";
+import { cn } from "~/utils/cn";
+import { type ButtonContentPropsType, LinkButton } from "./Buttons";
+import { Paragraph, type ParagraphVariant } from "./Paragraph";
+import { ShortcutKey } from "./ShortcutKey";
+import { ShortcutDefinition, useShortcutKeys } from "~/hooks/useShortcutKeys";
 
 const Popover = PopoverPrimitive.Root;
-
 const PopoverTrigger = PopoverPrimitive.Trigger;
 
 const PopoverContent = React.forwardRef<
@@ -22,19 +23,27 @@ const PopoverContent = React.forwardRef<
       sideOffset={sideOffset}
       avoidCollisions={true}
       className={cn(
-        "z-50 w-72 rounded-md border bg-popover p-4 text-popover-foreground shadow-md outline-none animate-in data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
+        "z-50 min-w-max rounded border border-charcoal-700 bg-background-bright p-4 shadow-md outline-none animate-in data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2",
         className
       )}
-      style={{ maxHeight: "var(--radix-popover-content-available-height)" }}
+      style={{
+        maxHeight: "var(--radix-popover-content-available-height)",
+      }}
       {...props}
     />
   </PopoverPrimitive.Portal>
 ));
 PopoverContent.displayName = PopoverPrimitive.Content.displayName;
 
-function PopoverSectionHeader({ title }: { title: string }) {
+function PopoverSectionHeader({
+  title,
+  variant = "extra-extra-small/dimmed/caps",
+}: {
+  title: string;
+  variant?: ParagraphVariant;
+}) {
   return (
-    <Paragraph variant="extra-extra-small/bright/caps" className="bg-slate-900 px-2.5 py-2">
+    <Paragraph variant={variant} className="bg-charcoal-750 px-2.5 py-1.5">
       {title}
     </Paragraph>
   );
@@ -45,28 +54,36 @@ function PopoverMenuItem({
   icon,
   title,
   isSelected,
+  variant = { variant: "small-menu-item" },
+  leadingIconClassName,
 }: {
   to: string;
-  icon: string;
+  icon: string | React.ComponentType<any>;
   title: React.ReactNode;
   isSelected?: boolean;
+  variant?: ButtonContentPropsType;
+  leadingIconClassName?: string;
 }) {
   return (
     <LinkButton
       to={to}
-      variant="menu-item"
+      variant={variant.variant}
       LeadingIcon={icon}
+      leadingIconClassName={leadingIconClassName}
       fullWidth
       textAlignLeft
       TrailingIcon={isSelected ? "check" : undefined}
-      className={isSelected ? "bg-slate-750 group-hover:bg-slate-750" : undefined}
+      className={cn(
+        "group-hover:bg-charcoal-700",
+        isSelected ? "bg-charcoal-750 group-hover:bg-charcoal-600/50" : undefined
+      )}
     >
       {title}
     </LinkButton>
   );
 }
 
-function PopoverArrowTrigger({
+function PopoverCustomTrigger({
   isOpen,
   children,
   className,
@@ -76,15 +93,89 @@ function PopoverArrowTrigger({
     <PopoverTrigger
       {...props}
       className={cn(
-        "group flex h-6 items-center gap-1 rounded px-2 text-dimmed transition hover:bg-slate-850 hover:text-bright",
+        "group flex items-center justify-end gap-1 rounded text-text-dimmed transition focus-custom hover:bg-charcoal-850 hover:text-text-bright",
         className
       )}
     >
-      <Paragraph variant="extra-small" className="transition group-hover:text-bright">
+      {children}
+    </PopoverTrigger>
+  );
+}
+
+function PopoverSideMenuTrigger({
+  isOpen,
+  children,
+  className,
+  shortcut,
+  ...props
+}: { isOpen?: boolean; shortcut?: ShortcutDefinition } & React.ComponentPropsWithoutRef<
+  typeof PopoverTrigger
+>) {
+  const ref = React.useRef<HTMLButtonElement>(null);
+  useShortcutKeys({
+    shortcut: shortcut,
+    action: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (ref.current) {
+        ref.current.click();
+      }
+    },
+  });
+
+  return (
+    <PopoverTrigger
+      {...props}
+      ref={ref}
+      className={cn(
+        "flex h-[1.8rem] shrink-0 select-none items-center gap-x-1.5 rounded-sm bg-transparent px-[0.4rem] text-center font-sans text-2sm font-normal text-text-bright transition duration-150 focus-custom hover:bg-charcoal-750",
+        shortcut ? "justify-between" : "",
+        className
+      )}
+    >
+      {children}
+      {shortcut && (
+        <ShortcutKey className={cn("size-4 flex-none")} shortcut={shortcut} variant={"small"} />
+      )}
+    </PopoverTrigger>
+  );
+}
+
+function PopoverArrowTrigger({
+  isOpen,
+  children,
+  fullWidth = false,
+  overflowHidden = false,
+  className,
+  ...props
+}: {
+  isOpen?: boolean;
+  fullWidth?: boolean;
+  overflowHidden?: boolean;
+} & React.ComponentPropsWithoutRef<typeof PopoverTrigger>) {
+  return (
+    <PopoverTrigger
+      {...props}
+      className={cn(
+        "group flex h-6 items-center gap-1 rounded px-2 text-text-dimmed transition focus-custom hover:bg-charcoal-700 hover:text-text-bright",
+        fullWidth && "w-full justify-between",
+        className
+      )}
+    >
+      <Paragraph
+        variant="extra-small"
+        className={cn(
+          "flex transition group-hover:text-text-bright",
+          overflowHidden && "overflow-hidden"
+        )}
+      >
         {children}
       </Paragraph>
       <ChevronDownIcon
-        className={cn("h-3 w-3 transition group-hover:text-bright", isOpen && "-rotate-180")}
+        className={cn(
+          "h-3 w-3 min-w-[0.75rem] text-charcoal-600 transition group-hover:text-text-bright",
+          isOpen && "-rotate-180"
+        )}
       />
     </PopoverTrigger>
   );
@@ -99,21 +190,23 @@ function PopoverVerticalEllipseTrigger({
     <PopoverTrigger
       {...props}
       className={cn(
-        "group flex items-center justify-end gap-1 rounded px-1.5 py-1.5 text-dimmed transition hover:bg-slate-750 hover:text-bright",
+        "group flex items-center justify-end gap-1 rounded-[3px] p-0.5 text-text-dimmed transition focus-custom hover:bg-tertiary hover:text-text-bright",
         className
       )}
     >
-      <EllipsisVerticalIcon className={cn("h-5 w-5 transition group-hover:text-bright")} />
+      <EllipsisVerticalIcon className={cn("size-5 transition group-hover:text-text-bright")} />
     </PopoverTrigger>
   );
 }
 
 export {
   Popover,
-  PopoverTrigger,
-  PopoverContent,
-  PopoverSectionHeader,
   PopoverArrowTrigger,
+  PopoverContent,
+  PopoverCustomTrigger,
   PopoverMenuItem,
+  PopoverSectionHeader,
+  PopoverSideMenuTrigger,
+  PopoverTrigger,
   PopoverVerticalEllipseTrigger,
 };

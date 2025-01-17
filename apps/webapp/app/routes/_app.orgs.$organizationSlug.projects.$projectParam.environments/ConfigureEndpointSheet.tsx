@@ -2,11 +2,15 @@ import { conform, useForm } from "@conform-to/react";
 import { parse } from "@conform-to/zod";
 import { useFetcher, useRevalidator } from "@remix-run/react";
 import { useEffect } from "react";
-import { useEventSource } from "remix-utils";
+import { useEventSource } from "~/hooks/useEventSource";
 import { InlineCode } from "~/components/code/InlineCode";
+import {
+  EndpointIndexStatusIcon,
+  EndpointIndexStatusLabel,
+} from "~/components/environments/EndpointIndexStatus";
 import { EnvironmentLabel } from "~/components/environments/EnvironmentLabel";
 import { Button } from "~/components/primitives/Buttons";
-import { Callout } from "~/components/primitives/Callout";
+import { Callout, CalloutVariant } from "~/components/primitives/Callout";
 import { ClipboardField } from "~/components/primitives/ClipboardField";
 import { DateTime } from "~/components/primitives/DateTime";
 import { FormError } from "~/components/primitives/FormError";
@@ -18,7 +22,7 @@ import { Paragraph } from "~/components/primitives/Paragraph";
 import { Sheet, SheetBody, SheetContent, SheetHeader } from "~/components/primitives/Sheet";
 import { ClientEndpoint } from "~/presenters/EnvironmentsPresenter.server";
 import { endpointStreamingPath } from "~/utils/pathBuilder";
-import { RuntimeEnvironmentType } from "../../../../../packages/database/src";
+import { EndpointIndexStatus, RuntimeEnvironmentType } from "@trigger.dev/database";
 import { bodySchema } from "../resources.environments.$environmentParam.endpoint";
 
 type ConfigureEndpointSheetProps = {
@@ -33,7 +37,7 @@ export function ConfigureEndpointSheet({ slug, endpoint, onClose }: ConfigureEnd
 
   const [form, { url, clientSlug }] = useForm({
     id: "endpoint-url",
-    lastSubmission: setEndpointUrlFetcher.data,
+    lastSubmission: setEndpointUrlFetcher.data as any,
     onValidate({ formData }) {
       return parse(formData, { schema: bodySchema });
     },
@@ -42,6 +46,9 @@ export function ConfigureEndpointSheet({ slug, endpoint, onClose }: ConfigureEnd
 
   const refreshEndpointFetcher = useFetcher();
   const refreshingEndpoint = refreshEndpointFetcher.state !== "idle";
+
+  const deleteEndpointFetcher = useFetcher();
+  const deletingEndpoint = deleteEndpointFetcher.state !== "idle";
 
   const revalidator = useRevalidator();
   const events = useEventSource(endpointStreamingPath({ id: endpoint.environment.id }), {
@@ -66,12 +73,30 @@ export function ConfigureEndpointSheet({ slug, endpoint, onClose }: ConfigureEnd
     >
       <SheetContent size="lg">
         <SheetHeader>
-          <Header1>
-            <div className="flex items-center gap-2">
-              <EnvironmentLabel environment={{ type: endpoint.environment.type }} />
-              <Header1>Configure endpoint</Header1>
-            </div>
-          </Header1>
+          <div className="flex w-full items-center justify-between">
+            <Header1>
+              <div className="flex items-center gap-2">
+                <EnvironmentLabel environment={{ type: endpoint.environment.type }} />
+                <Header1>Configure endpoint</Header1>
+              </div>
+            </Header1>
+            {endpoint.state === "configured" && (
+              <deleteEndpointFetcher.Form
+                method="post"
+                action={`/resources/environments/${endpoint.environment.id}/endpoint/${endpoint.id}`}
+              >
+                <input type="hidden" name="action" value="delete" />
+                <Button
+                  variant="danger/small"
+                  type="submit"
+                  disabled={deletingEndpoint}
+                  LeadingIcon={deletingEndpoint ? "spinner-white" : undefined}
+                >
+                  {deletingEndpoint ? "Deleting" : "Delete"}
+                </Button>
+              </deleteEndpointFetcher.Form>
+            )}
+          </div>
         </SheetHeader>
         <SheetBody>
           <setEndpointUrlFetcher.Form
@@ -86,7 +111,7 @@ export function ConfigureEndpointSheet({ slug, endpoint, onClose }: ConfigureEnd
                 <Input
                   className="rounded-r-none"
                   {...conform.input(url, { type: "url" })}
-                  defaultValue={"url" in endpoint ? endpoint.url : ""}
+                  defaultValue={"url" in endpoint ? endpoint.url ?? "" : ""}
                   placeholder="URL for your Trigger API route"
                 />
                 <Button
@@ -119,25 +144,44 @@ export function ConfigureEndpointSheet({ slug, endpoint, onClose }: ConfigureEnd
                   method="post"
                   action={`/resources/environments/${endpoint.environment.id}/endpoint/${endpoint.id}`}
                 >
-                  <Callout variant="success" className="justiy-between items-center">
-                    <Paragraph variant="small" className="grow text-green-200">
-                      Endpoint configured. Last refreshed:{" "}
-                      {endpoint.latestIndex ? (
-                        <DateTime date={endpoint.latestIndex.updatedAt} />
-                      ) : (
-                        "–"
-                      )}
-                    </Paragraph>
+                  <input type="hidden" name="action" value="refresh" />
+                  <Callout
+                    variant="info"
+                    icon={
+                      <EndpointIndexStatusIcon status={endpoint.latestIndex?.status ?? "PENDING"} />
+                    }
+                    className="justiy-between items-center"
+                  >
+                    <div className="flex grow items-center gap-2">
+                      <EndpointIndexStatusLabel
+                        status={endpoint.latestIndex?.status ?? "PENDING"}
+                      />
+                      <Paragraph variant="small" className="grow">
+                        Last refreshed:{" "}
+                        {endpoint.latestIndex ? (
+                          <>
+                            <DateTime date={endpoint.latestIndex.updatedAt} />
+                          </>
+                        ) : (
+                          "–"
+                        )}
+                      </Paragraph>
+                    </div>
+
                     <Button
-                      variant="primary/small"
+                      variant="secondary/small"
                       type="submit"
-                      className="bg-green-700 group-hover:bg-green-600/90"
                       disabled={refreshingEndpoint}
                       LeadingIcon={refreshingEndpoint ? "spinner-white" : undefined}
                     >
                       {refreshingEndpoint ? "Refreshing" : "Refresh now"}
                     </Button>
                   </Callout>
+                  {endpoint.latestIndex?.error && (
+                    <FormError className="p-2">
+                      <pre>{endpoint.latestIndex.error.message}</pre>
+                    </FormError>
+                  )}
                 </refreshEndpointFetcher.Form>
               </div>
               <div className="max-w-full overflow-hidden">
@@ -154,4 +198,17 @@ export function ConfigureEndpointSheet({ slug, endpoint, onClose }: ConfigureEnd
       </SheetContent>
     </Sheet>
   );
+}
+
+function calloutVariantFromStatus(status: EndpointIndexStatus): CalloutVariant {
+  switch (status) {
+    case "PENDING":
+      return "pending";
+    case "STARTED":
+      return "pending";
+    case "SUCCESS":
+      return "success";
+    case "FAILURE":
+      return "error";
+  }
 }

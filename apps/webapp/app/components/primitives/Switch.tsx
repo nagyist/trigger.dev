@@ -6,16 +6,17 @@ import { cn } from "~/utils/cn";
 
 const variations = {
   large: {
-    container: "flex items-center gap-x-2 rounded-md hover:bg-slate-850 p-2",
+    container: "flex items-center gap-x-2 rounded-md hover:bg-tertiary p-2 transition focus-custom",
     root: "h-6 w-11",
-    thumb: "h-5 w-5 data-[state=checked]:translate-x-5 data-[state=unchecked]:translate-x-0",
-    text: "text-sm text-slate-400 group-hover:text-slate-200",
+    thumb: "size-5 data-[state=checked]:translate-x-5 data-[state=unchecked]:translate-x-0",
+    text: "text-sm text-text-dimmed",
   },
   small: {
-    container: "flex items-center gap-x-1.5 rounded hover:bg-slate-850 pr-1 py-[0.1rem] pl-1.5",
+    container:
+      "flex items-center h-[1.5rem] gap-x-1.5 rounded hover:bg-tertiary disabled:hover:bg-transparent pr-1 py-[0.1rem] pl-1.5 transition focus-custom disabled:hover:text-charcoal-400 disabled:opacity-50 text-charcoal-400 hover:text-charcoal-200 disabled:hover:cursor-not-allowed hover:cursor-pointer",
     root: "h-3 w-6",
-    thumb: "h-2.5 w-2.5 data-[state=checked]:translate-x-2.5 data-[state=unchecked]:translate-x-0",
-    text: "text-xs text-slate-400 group-hover:text-slate-200 hover:cursor-pointer",
+    thumb: "size-2.5 data-[state=checked]:translate-x-2.5 data-[state=unchecked]:translate-x-0",
+    text: "text-xs text-text-dimmed",
   },
 };
 
@@ -31,20 +32,20 @@ export const Switch = React.forwardRef<React.ElementRef<typeof SwitchPrimitives.
     return (
       <SwitchPrimitives.Root className={cn("group", container, className)} {...props} ref={ref}>
         {label ? (
-          <label className={cn("text", text)}>
+          <label className={cn("whitespace-nowrap", text)}>
             {typeof label === "string" ? <span>{label}</span> : label}
           </label>
         ) : null}
         <div
           className={cn(
-            "peer inline-flex shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors group-focus-visible:ring-2 group-focus-visible:ring-ring group-focus-visible:ring-offset-2 group-focus-visible:ring-offset-background group-disabled:cursor-not-allowed group-disabled:opacity-50 group-data-[state=checked]:bg-primary group-data-[state=unchecked]:bg-slate-700 focus-visible:outline-none",
+            "inline-flex shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors group-disabled:cursor-not-allowed group-disabled:opacity-50 group-data-[state=checked]:bg-blue-500 group-data-[state=unchecked]:bg-charcoal-700 group-data-[state=unchecked]:group-hover:bg-charcoal-500/50",
             root
           )}
         >
           <SwitchPrimitives.Thumb
             className={cn(
               thumb,
-              "pointer-events-none block rounded-full bg-slate-200 shadow-lg ring-0 transition-transform"
+              "pointer-events-none block rounded-full bg-charcoal-200 transition group-data-[state=checked]:bg-text-bright"
             )}
           />
         </div>

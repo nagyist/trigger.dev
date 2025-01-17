@@ -1,10 +1,10 @@
-import { LoaderArgs } from "@remix-run/server-runtime";
+import { LoaderFunctionArgs } from "@remix-run/server-runtime";
 import { z } from "zod";
 import { prisma } from "~/db.server";
 import { requireUserId } from "~/services/session.server";
-import { sse } from "~/utils/sse";
+import { sse } from "~/utils/sse.server";
 
-export async function loader({ request, params }: LoaderArgs) {
+export async function loader({ request, params }: LoaderFunctionArgs) {
   await requireUserId(request);
 
   const { projectId } = z.object({ projectId: z.string() }).parse(params);
@@ -37,7 +37,7 @@ export async function loader({ request, params }: LoaderArgs) {
 }
 
 function projectForUpdates(id: string) {
-  return prisma.project.findUnique({
+  return prisma.project.findFirst({
     where: {
       id,
     },

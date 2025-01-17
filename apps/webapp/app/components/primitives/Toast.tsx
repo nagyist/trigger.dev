@@ -5,6 +5,8 @@ import { Toaster, toast } from "sonner";
 import { useTypedLoaderData } from "remix-typedjson";
 import { loader } from "~/root";
 import { useEffect } from "react";
+import { Paragraph } from "./Paragraph";
+import { cn } from "~/utils/cn";
 
 const defaultToastDuration = 5000;
 const permanentToastDuration = 60 * 60 * 24 * 1000;
@@ -38,26 +40,27 @@ export function ToastUI({
 }) {
   return (
     <div
-      className={`self-end rounded-lg border border-slate-750 bg-midnight-900 shadow-md`}
+      className={cn(
+        "self-end rounded-md border border-grid-bright bg-background-dimmed",
+        variant === "success" && "border-success",
+        variant === "error" && "border-error"
+      )}
       style={{
         width: toastWidth,
       }}
     >
-      <div
-        className="flex w-full gap-2 rounded-lg bg-no-repeat p-4 text-bright"
-        style={{
-          background:
-            "radial-gradient(at top, hsla(271, 91%, 65%, 0.18), hsla(221, 83%, 53%, 0.18)) hsla(221, 83%, 53%, 0.18)",
-        }}
-      >
+      <div className="flex w-full items-start gap-2 rounded-lg p-3">
         {variant === "success" ? (
-          <CheckCircleIcon className="h-6 w-6 text-green-600" />
+          <CheckCircleIcon className="mt-1 size-6 min-w-6 text-success" />
         ) : (
-          <ExclamationCircleIcon className="h-6 w-6 text-rose-600" />
+          <ExclamationCircleIcon className="mt-1 size-6 min-w-6 text-error" />
         )}
-        {message}
-        <button className="ms-auto p-1" onClick={() => toast.dismiss(t)}>
-          <XMarkIcon className="h-4 w-4 text-bright" />
+        <Paragraph className="py-1 text-text-bright">{message}</Paragraph>
+        <button
+          className="hover:bg-midnight-800 ms-auto rounded p-2 text-text-dimmed transition hover:text-text-bright"
+          onClick={() => toast.dismiss(t)}
+        >
+          <XMarkIcon className="size-4" />
         </button>
       </div>
     </div>

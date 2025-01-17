@@ -1,6 +1,8 @@
-import { H } from "@highlight-run/node";
-import type { DataFunctionArgs, EntryContext, Headers } from "@remix-run/node"; // or cloudflare/deno
-import { Response } from "@remix-run/node"; // or cloudflare/deno
+import {
+  createReadableStreamFromReadable,
+  type DataFunctionArgs,
+  type EntryContext,
+} from "@remix-run/node"; // or cloudflare/deno
 import { RemixServer } from "@remix-run/react";
 import { parseAcceptLanguage } from "intl-parse-accept-language";
 import isbot from "isbot";
@@ -12,7 +14,8 @@ import {
   OperatingSystemContextProvider,
   OperatingSystemPlatform,
 } from "./components/primitives/OperatingSystemProvider";
-import { env } from "./env.server";
+import { getSharedSqsEventConsumer } from "./services/events/sqsEventConsumer";
+import { singleton } from "./utils/singleton";
 
 const ABORT_DELAY = 30000;
 
@@ -36,7 +39,7 @@ export default function handleRequest(
   // response to render before sending it to the client. This
   // ensures that bots can see the full page content.
   if (isbot(request.headers.get("user-agent"))) {
-    return serveTheBots(
+    return handleBotRequest(
       request,
       responseStatusCode,
       responseHeaders,
@@ -46,7 +49,7 @@ export default function handleRequest(
     );
   }
 
-  return serveBrowsers(
+  return handleBrowserRequest(
     request,
     responseStatusCode,
     responseHeaders,
@@ -56,7 +59,7 @@ export default function handleRequest(
   );
 }
 
-function serveTheBots(
+function handleBotRequest(
   request: Request,
   responseStatusCode: number,
   responseHeaders: Headers,
@@ -65,82 +68,99 @@ function serveTheBots(
   platform: OperatingSystemPlatform
 ) {
   return new Promise((resolve, reject) => {
+    let shellRendered = false;
     const { pipe, abort } = renderToPipeableStream(
       <OperatingSystemContextProvider platform={platform}>
         <LocaleContextProvider locales={locales}>
-          <RemixServer context={remixContext} url={request.url} abortDelay={ABORT_DELAY} />
+          <RemixServer context={remixContext} url={request.url} abortDelay={ABORT_DELAY} />,
         </LocaleContextProvider>
       </OperatingSystemContextProvider>,
       {
-        // Use onAllReady to wait for the entire document to be ready
         onAllReady() {
-          responseHeaders.set("Content-Type", "text/html; charset=utf-8");
-          let body = new PassThrough();
-          pipe(body);
-          resolve(
-            new Response(body, {
-              status: responseStatusCode,
-              headers: responseHeaders,
-            })
-          );
-        },
-        onShellError(err: unknown) {
-          reject(err);
-        },
-      }
-    );
-    setTimeout(abort, ABORT_DELAY);
-  });
-}
+          shellRendered = true;
+          const body = new PassThrough();
+          const stream = createReadableStreamFromReadable(body);
 
-function serveBrowsers(
-  request: Request,
-  responseStatusCode: number,
-  responseHeaders: Headers,
-  remixContext: EntryContext,
-  locales: string[],
-  platform: OperatingSystemPlatform
-) {
-  return new Promise((resolve, reject) => {
-    let didError = false;
-    let shellReady = false;
-    const { pipe, abort } = renderToPipeableStream(
-      <OperatingSystemContextProvider platform={platform}>
-        <LocaleContextProvider locales={locales}>
-          <RemixServer context={remixContext} url={request.url} abortDelay={ABORT_DELAY} />
-        </LocaleContextProvider>
-      </OperatingSystemContextProvider>,
-      {
-        // use onShellReady to wait until a suspense boundary is triggered
-        onShellReady() {
-          shellReady = true;
-          responseHeaders.set("Content-Type", "text/html; charset=utf-8");
-          let body = new PassThrough();
-          pipe(body);
+          responseHeaders.set("Content-Type", "text/html");
+
           resolve(
-            new Response(body, {
-              status: didError ? 500 : responseStatusCode,
+            new Response(stream, {
               headers: responseHeaders,
+              status: responseStatusCode,
             })
           );
+
+          pipe(body);
         },
-        onShellError(err: unknown) {
-          reject(err);
+        onShellError(error: unknown) {
+          reject(error);
         },
         onError(error: unknown) {
-          didError = true;
-          if (shellReady) {
-            logError(error, request);
+          responseStatusCode = 500;
+          // Log streaming rendering errors from inside the shell.  Don't log
+          // errors encountered during initial shell rendering since they'll
+          // reject and get logged in handleDocumentRequest.
+          if (shellRendered) {
+            console.error(error);
           }
         },
       }
     );
+
     setTimeout(abort, ABORT_DELAY);
   });
 }
 
-if (env.HIGHLIGHT_PROJECT_ID) {
-  H.init({ projectID: env.HIGHLIGHT_PROJECT_ID });
+function handleBrowserRequest(
+  request: Request,
+  responseStatusCode: number,
+  responseHeaders: Headers,
+  remixContext: EntryContext,
+  locales: string[],
+  platform: OperatingSystemPlatform
+) {
+  return new Promise((resolve, reject) => {
+    let shellRendered = false;
+    const { pipe, abort } = renderToPipeableStream(
+      <OperatingSystemContextProvider platform={platform}>
+        <LocaleContextProvider locales={locales}>
+          <RemixServer context={remixContext} url={request.url} abortDelay={ABORT_DELAY} />
+        </LocaleContextProvider>
+      </OperatingSystemContextProvider>,
+      {
+        onShellReady() {
+          shellRendered = true;
+          const body = new PassThrough();
+          const stream = createReadableStreamFromReadable(body);
+
+          responseHeaders.set("Content-Type", "text/html");
+
+          resolve(
+            new Response(stream, {
+              headers: responseHeaders,
+              status: responseStatusCode,
+            })
+          );
+
+          pipe(body);
+        },
+        onShellError(error: unknown) {
+          reject(error);
+        },
+        onError(error: unknown) {
+          responseStatusCode = 500;
+          // Log streaming rendering errors from inside the shell.  Don't log
+          // errors encountered during initial shell rendering since they'll
+          // reject and get logged in handleDocumentRequest.
+          if (shellRendered) {
+            console.error(error);
+          }
+        },
+      }
+    );
+
+    setTimeout(abort, ABORT_DELAY);
+  });
 }
 
 export function handleError(error: unknown, { request, params, context }: DataFunctionArgs) {
@@ -152,17 +172,49 @@ Worker.init().catch((error) => {
 });
 
 function logError(error: unknown, request?: Request) {
-  if (env.HIGHLIGHT_PROJECT_ID) {
-    const parsed = request ? H.parseHeaders(Object.fromEntries(request.headers)) : undefined;
-    if (error instanceof Error) {
-      H.consumeError(error, parsed?.secureSessionId, parsed?.requestId);
-    } else {
-      H.consumeError(
-        new Error(`Unknown error: ${JSON.stringify(error)}`),
-        parsed?.secureSessionId,
-        parsed?.requestId
-      );
-    }
-  }
   console.error(error);
+
+  if (error instanceof Error && error.message.startsWith("There are locked jobs present")) {
+    console.log("⚠️  graphile-worker migration issue detected!");
+  }
+}
+
+process.on("uncaughtException", (error, origin) => {
+  if (
+    error instanceof Prisma.PrismaClientKnownRequestError ||
+    error instanceof Prisma.PrismaClientUnknownRequestError
+  ) {
+    // Don't exit the process if the error is a Prisma error
+    logger.error("uncaughtException prisma error", {
+      error,
+      prismaMessage: error.message,
+      code: "code" in error ? error.code : undefined,
+      meta: "meta" in error ? error.meta : undefined,
+      stack: error.stack,
+      origin,
+    });
+  } else {
+    logger.error("uncaughtException", {
+      error: { name: error.name, message: error.message, stack: error.stack },
+      origin,
+    });
+  }
+
+  process.exit(1);
+});
+
+const sqsEventConsumer = singleton("sqsEventConsumer", getSharedSqsEventConsumer);
+
+export { apiRateLimiter } from "./services/apiRateLimit.server";
+export { socketIo } from "./v3/handleSocketIo.server";
+export { wss } from "./v3/handleWebsockets.server";
+export { registryProxy } from "./v3/registryProxy.server";
+export { runWithHttpContext } from "./services/httpAsyncStorage.server";
+import { eventLoopMonitor } from "./eventLoopMonitor.server";
+import { env } from "./env.server";
+import { logger } from "./services/logger.server";
+import { Prisma } from "./db.server";
+
+if (env.EVENT_LOOP_MONITOR_ENABLED === "1") {
+  eventLoopMonitor.enable();
 }

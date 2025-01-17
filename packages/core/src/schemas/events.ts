@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { RunStatusSchema } from "./runs";
+import { RunStatusSchema } from "./runs.js";
 
 export const GetEventSchema = z.object({
   /** The event id */
@@ -26,3 +26,10 @@ export const GetEventSchema = z.object({
 });
 
 export type GetEvent = z.infer<typeof GetEventSchema>;
+
+export const CancelRunsForEventSchema = z.object({
+  cancelledRunIds: z.array(z.string()),
+  failedToCancelRunIds: z.array(z.string()),
+});
+
+export type CancelRunsForEvent = z.infer<typeof CancelRunsForEventSchema>;

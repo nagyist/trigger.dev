@@ -6,8 +6,8 @@ import {
 } from "@trigger.dev/core";
 import { $transaction, PrismaClientOrTransaction, prisma } from "~/db.server";
 import { parseExpression } from "cron-parser";
-import { workerQueue } from "../worker.server";
 import { logger } from "../logger.server";
+import { DeliverScheduledEventService } from "./deliverScheduledEvent.server";
 
 export class NextScheduledEventService {
   #prismaClient: PrismaClientOrTransaction;
@@ -36,7 +36,7 @@ export class NextScheduledEventService {
 
       const scheduleTime = calculateNextScheduledEvent(
         schedule.data,
-        scheduleSource.lastEventTimestamp
+        scheduleSource.lastEventTimestamp ?? scheduleSource.createdAt
       );
 
       logger.debug("enqueuing scheduled event", {
@@ -45,30 +45,15 @@ export class NextScheduledEventService {
         lastTimestamp: scheduleSource.lastEventTimestamp,
       });
 
-      const workerJob = await workerQueue.enqueue(
-        "events.deliverScheduled",
+      await DeliverScheduledEventService.enqueue(
+        scheduleSource.id,
+        scheduleTime,
         {
-          id: scheduleSource.id,
-          payload: {
-            ts: scheduleTime,
-            lastTimestamp: scheduleSource.lastEventTimestamp ?? undefined,
-          },
+          ts: scheduleTime,
+          lastTimestamp: scheduleSource.lastEventTimestamp ?? undefined,
         },
-        {
-          runAt: scheduleTime,
-          tx,
-          jobKey: `scheduled:${scheduleSource.id}`,
-        }
+        tx
       );
-
-      await this.#prismaClient.scheduleSource.update({
-        where: {
-          id: scheduleSource.id,
-        },
-        data: {
-          workerJobId: workerJob.id,
-        },
-      });
 
       return scheduleSource;
     });

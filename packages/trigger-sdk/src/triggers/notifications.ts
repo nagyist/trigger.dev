@@ -7,10 +7,10 @@ import {
   MissingConnectionResolvedNotificationPayloadSchema,
   TriggerMetadata,
 } from "@trigger.dev/core";
-import { TriggerIntegration } from "../integrations";
-import { Job } from "../job";
-import { TriggerClient } from "../triggerClient";
-import { EventSpecification, Trigger } from "../types";
+import { TriggerIntegration } from "../integrations.js";
+import { Job } from "../job.js";
+import { TriggerClient } from "../triggerClient.js";
+import { EventSpecification, Trigger } from "../types.js";
 
 export function missingConnectionNotification(integrations: Array<TriggerIntegration>) {
   return new MissingConnectionNotification({ integrations });
@@ -55,6 +55,12 @@ export class MissingConnectionNotification
 
   get preprocessRuns() {
     return false;
+  }
+
+  async verifyPayload(
+    payload: ReturnType<MissingConnectionNotificationSpecification["parsePayload"]>
+  ) {
+    return { success: true as const };
   }
 
   toJSON(): TriggerMetadata {
@@ -105,6 +111,12 @@ export class MissingConnectionResolvedNotification
 
   get preprocessRuns() {
     return false;
+  }
+
+  async verifyPayload(
+    payload: ReturnType<MissingConnectionResolvedNotificationSpecification["parsePayload"]>
+  ) {
+    return { success: true as const };
   }
 
   toJSON(): TriggerMetadata {

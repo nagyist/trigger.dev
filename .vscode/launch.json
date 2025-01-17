@@ -9,8 +9,17 @@
       "request": "launch",
       "name": "Debug WebApp",
       "command": "pnpm run dev --filter webapp",
-      "envFile": "${workspaceFolder}/apps/webapp/.env",
+      "envFile": "${workspaceFolder}/.env",
       "cwd": "${workspaceFolder}",
+      "sourceMaps": true
+    },
+    {
+      "type": "node-terminal",
+      "request": "launch",
+      "name": "Debug realtimeStreams.test.ts",
+      "command": "pnpm run test -t RealtimeStreams",
+      "envFile": "${workspaceFolder}/.env",
+      "cwd": "${workspaceFolder}/apps/webapp",
       "sourceMaps": true
     },
     {
@@ -23,10 +32,89 @@
     {
       "type": "node-terminal",
       "request": "launch",
-      "name": "Debug BYO Auth",
-      "command": "pnpm run byo-auth",
-      "envFile": "${workspaceFolder}/references/job-catalog/.env",
-      "cwd": "${workspaceFolder}/references/job-catalog",
+      "name": "Debug V3 init CLI",
+      "command": "pnpm exec trigger init",
+      "cwd": "${workspaceFolder}/references/init-shell",
+      "sourceMaps": true
+    },
+    {
+      "type": "node-terminal",
+      "request": "launch",
+      "name": "Debug V3 Dev CLI",
+      "command": "pnpm exec trigger dev",
+      "cwd": "${workspaceFolder}/references/v3-catalog",
+      "sourceMaps": true
+    },
+    {
+      "type": "node-terminal",
+      "request": "launch",
+      "name": "Debug Dev Next.js Realtime",
+      "command": "pnpm exec trigger dev",
+      "cwd": "${workspaceFolder}/references/nextjs-realtime",
+      "sourceMaps": true
+    },
+    {
+      "type": "node-terminal",
+      "request": "launch",
+      "name": "Debug prisma-catalog deploy CLI",
+      "command": "pnpm exec trigger deploy --self-hosted --load-image",
+      "cwd": "${workspaceFolder}/references/prisma-catalog",
+      "sourceMaps": true
+    },
+    {
+      "type": "node-terminal",
+      "request": "launch",
+      "name": "Debug V3 Deploy CLI",
+      "command": "pnpm exec trigger deploy --self-hosted --load-image",
+      "cwd": "${workspaceFolder}/references/v3-catalog",
+      "sourceMaps": true
+    },
+    {
+      "type": "node-terminal",
+      "request": "launch",
+      "name": "Debug V3 list-profiles CLI",
+      "command": "pnpm exec trigger list-profiles --log-level debug",
+      "cwd": "${workspaceFolder}/references/v3-catalog",
+      "sourceMaps": true
+    },
+    {
+      "type": "node-terminal",
+      "request": "launch",
+      "name": "Debug V3 update CLI",
+      "command": "pnpm exec trigger update",
+      "cwd": "${workspaceFolder}/references/v3-catalog",
+      "sourceMaps": true
+    },
+    {
+      "type": "node-terminal",
+      "request": "launch",
+      "name": "Debug V3 Management",
+      "command": "pnpm run management",
+      "cwd": "${workspaceFolder}/references/v3-catalog",
+      "sourceMaps": true
+    },
+    {
+      "type": "node",
+      "request": "attach",
+      "name": "Attach to Trigger.dev CLI (v3)",
+      "port": 9229,
+      "restart": true,
+      "skipFiles": ["<node_internals>/**"]
+    },
+    {
+      "type": "node-terminal",
+      "request": "launch",
+      "name": "Debug CLI e2e tests",
+      "command": "MOD=otel-telemetry-loader pnpm run test:e2e",
+      "cwd": "${workspaceFolder}/packages/cli-v3",
+      "sourceMaps": true
+    },
+    {
+      "type": "node-terminal",
+      "request": "launch",
+      "name": "debug v3 hello-world dev",
+      "command": "pnpm exec trigger dev",
+      "cwd": "${workspaceFolder}/references/hello-world",
       "sourceMaps": true
     }
   ]

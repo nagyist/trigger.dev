@@ -1,13 +1,12 @@
 import {
   API_VERSIONS,
-  ApiEventLog,
-  DeliverEventResponseSchema,
-  DeserializedJson,
+  ConnectionAuth,
   EndpointHeadersSchema,
   ErrorWithStackSchema,
-  HttpSourceRequest,
+  ExecuteJobHeadersSchema,
   HttpSourceResponseSchema,
   IndexEndpointResponseSchema,
+  NormalizedResponseSchema,
   PongResponse,
   PongResponseSchema,
   PreprocessRunBody,
@@ -16,13 +15,24 @@ import {
   RegisterTriggerBodyV1,
   RunJobBody,
   RunJobResponseSchema,
+  RunNotification,
   ValidateResponse,
   ValidateResponseSchema,
+  WebhookDeliveryResponseSchema,
 } from "@trigger.dev/core";
+import { performance } from "node:perf_hooks";
 import { safeBodyFromResponse, safeParseBodyFromResponse } from "~/utils/json";
 import { logger } from "./logger.server";
-import { ConnectionAuth } from "@trigger.dev/core";
-import { performance } from "node:perf_hooks";
+import { z } from "zod";
+
+const HttpSourceRequestSchema = z.object({
+  url: z.string().url(),
+  method: z.string(),
+  headers: z.record(z.string()),
+  rawBody: z.instanceof(Buffer).optional().nullable(),
+});
+
+export type HttpSourceRequest = z.infer<typeof HttpSourceRequestSchema>;
 
 export class EndpointApiError extends Error {
   constructor(message: string, stack?: string) {
@@ -97,6 +107,7 @@ export class EndpointApi {
       return {
         ...pongResponse.data,
         triggerVersion: headers.data["trigger-version"],
+        triggerSdkVersion: headers.data["trigger-sdk-version"],
       };
     }
 
@@ -104,6 +115,7 @@ export class EndpointApi {
   }
 
   async indexEndpoint() {
+    const startTimeInMs = performance.now();
     const response = await safeFetch(this.url, {
       method: "POST",
       headers: {
@@ -111,45 +123,20 @@ export class EndpointApi {
         "x-trigger-api-key": this.apiKey,
         "x-trigger-action": "INDEX_ENDPOINT",
       },
+      redirect: "manual",
+      signal: AbortSignal.timeout(5_000),
     });
 
-    if (!response) {
-      throw new Error(`Could not connect to endpoint ${this.url}`);
-    }
-
-    if (response.status === 401) {
-      const body = await safeBodyFromResponse(response, ErrorWithStackSchema);
-
-      if (body) {
-        return {
-          ok: false,
-          error: body.message,
-        } as const;
-      }
-
-      return {
-        ok: false,
-        error: `Trigger API key is invalid`,
-      } as const;
-    }
-
-    if (!response.ok) {
-      throw new Error(`Could not connect to endpoint ${this.url}. Status code: ${response.status}`);
-    }
-
-    const anyBody = await response.json();
-
-    const data = IndexEndpointResponseSchema.parse(anyBody);
-    const headers = EndpointHeadersSchema.parse(Object.fromEntries(response.headers.entries()));
-
     return {
-      ok: true,
-      data,
-      headers,
-    } as const;
+      response,
+      headerParser: EndpointHeadersSchema,
+      parser: IndexEndpointResponseSchema,
+      errorParser: ErrorWithStackSchema,
+      durationInMs: Math.floor(performance.now() - startTimeInMs),
+    };
   }
 
-  async executeJobRequest(options: RunJobBody) {
+  async executeJobRequest(options: RunJobBody, timeoutInMs?: number) {
     const startTimeInMs = performance.now();
 
     const response = await safeFetch(this.url, {
@@ -160,12 +147,23 @@ export class EndpointApi {
         "x-trigger-action": "EXECUTE_JOB",
       },
       body: JSON.stringify(options),
+      signal: timeoutInMs ? AbortSignal.timeout(timeoutInMs) : undefined,
     });
+
+    if (response) {
+      logger.debug("executeJobRequest() response from endpoint", {
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries()),
+      });
+    } else {
+      logger.debug("executeJobRequest() no response from endpoint");
+    }
 
     return {
       response,
       parser: RunJobResponseSchema,
       errorParser: ErrorWithStackSchema,
+      headersParser: ExecuteJobHeadersSchema,
       durationInMs: Math.floor(performance.now() - startTimeInMs),
     };
   }
@@ -268,6 +266,75 @@ export class EndpointApi {
     return HttpSourceResponseSchema.parse(anyBody);
   }
 
+  async deliverWebhookRequest(options: {
+    key: string;
+    secret: string;
+    params: any;
+    request: HttpSourceRequest;
+  }) {
+    const response = await safeFetch(this.url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "x-trigger-api-key": this.apiKey,
+        "x-trigger-action": "DELIVER_WEBHOOK_REQUEST",
+        "x-ts-key": options.key,
+        "x-ts-secret": options.secret,
+        "x-ts-params": JSON.stringify(options.params ?? {}),
+        "x-ts-http-url": options.request.url,
+        "x-ts-http-method": options.request.method,
+        "x-ts-http-headers": JSON.stringify(options.request.headers),
+      },
+      body: options.request.rawBody,
+    });
+
+    if (!response) {
+      throw new Error(`Could not connect to endpoint ${this.url}`);
+    }
+
+    if (!response.ok) {
+      throw new Error(`Could not connect to endpoint ${this.url}. Status code: ${response.status}`);
+    }
+
+    const anyBody = await response.json();
+
+    logger.debug("deliverWebhookRequest() response from endpoint", {
+      body: anyBody,
+    });
+
+    return WebhookDeliveryResponseSchema.parse(anyBody);
+  }
+
+  async deliverHttpEndpointRequestForResponse(options: {
+    key: string;
+    secret: string;
+    request: HttpSourceRequest;
+  }) {
+    const response = await safeFetch(this.url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "x-trigger-api-key": this.apiKey,
+        "x-trigger-action": "DELIVER_HTTP_ENDPOINT_REQUEST_FOR_RESPONSE",
+        "x-ts-key": options.key,
+        "x-ts-http-url": options.request.url,
+        "x-ts-http-method": options.request.method,
+        "x-ts-http-headers": JSON.stringify(options.request.headers),
+      },
+      body: options.request.rawBody,
+    });
+
+    if (!response) {
+      throw new Error(`Could not connect to endpoint ${this.url}`);
+    }
+
+    if (!response.ok) {
+      throw new Error(`Could not connect to endpoint ${this.url}. Status code: ${response.status}`);
+    }
+
+    return { response, parser: NormalizedResponseSchema };
+  }
+
   async validate(): Promise<ValidateResponse> {
     const response = await safeFetch(this.url, {
       method: "POST",
@@ -334,6 +401,41 @@ export class EndpointApi {
 
     return validateResponse.data;
   }
+
+  async probe(timeout: number) {
+    const startTimeInMs = performance.now();
+
+    const response = await safeFetch(this.url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-trigger-api-key": this.apiKey,
+        "x-trigger-action": "PROBE_EXECUTION_TIMEOUT",
+      },
+      body: JSON.stringify({
+        timeout,
+      }),
+    });
+
+    return {
+      response,
+      durationInMs: Math.floor(performance.now() - startTimeInMs),
+    };
+  }
+
+  async deliverRunNotification(notification: RunNotification<any>) {
+    const response = await safeFetch(this.url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-trigger-api-key": this.apiKey,
+        "x-trigger-action": "RUN_NOTIFICATION",
+      },
+      body: JSON.stringify(notification),
+    });
+
+    return response;
+  }
 }
 
 async function safeFetch(url: string, options: RequestInit) {
@@ -342,7 +444,10 @@ async function safeFetch(url: string, options: RequestInit) {
   } catch (error) {
     logger.debug("Error while trying to connect to endpoint", {
       url,
-      error,
+      error:
+        error instanceof Error
+          ? { name: error.name, message: error.message, stack: error.stack }
+          : String(error),
     });
   }
 }
@@ -354,6 +459,7 @@ function addStandardRequestOptions(options: RequestInit) {
       ...options.headers,
       "user-agent": "triggerdotdev-server/2.0.0",
       "x-trigger-version": API_VERSIONS.LAZY_LOADED_CACHED_TASKS,
+      accept: "application/json",
     },
   };
 }

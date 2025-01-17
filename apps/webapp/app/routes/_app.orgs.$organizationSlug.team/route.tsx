@@ -1,13 +1,14 @@
 import { useForm } from "@conform-to/react";
 import { parse } from "@conform-to/zod";
-import { UserPlusIcon } from "@heroicons/react/20/solid";
+import { LockOpenIcon, UserPlusIcon } from "@heroicons/react/20/solid";
 import { Form, useActionData } from "@remix-run/react";
-import { ActionFunction, LoaderArgs, json } from "@remix-run/server-runtime";
+import { ActionFunction, LoaderFunctionArgs, json } from "@remix-run/server-runtime";
 import { useState } from "react";
 import { UseDataFunctionReturn, typedjson, useTypedLoaderData } from "remix-typedjson";
 import invariant from "tiny-invariant";
 import { z } from "zod";
 import { UserAvatar } from "~/components/UserProfilePhoto";
+import { AdminDebugTooltip } from "~/components/admin/debugTooltip";
 import { PageBody, PageContainer } from "~/components/layout/AppLayout";
 import {
   Alert,
@@ -20,37 +21,57 @@ import {
   AlertTrigger,
 } from "~/components/primitives/Alert";
 import { Button, ButtonContent, LinkButton } from "~/components/primitives/Buttons";
+import { DateTime } from "~/components/primitives/DateTime";
 import { Header2, Header3 } from "~/components/primitives/Headers";
+import { InfoPanel } from "~/components/primitives/InfoPanel";
 import { NamedIcon } from "~/components/primitives/NamedIcon";
+import { NavBar, PageAccessories, PageTitle } from "~/components/primitives/PageHeader";
 import { Paragraph } from "~/components/primitives/Paragraph";
+import * as Property from "~/components/primitives/PropertyTable";
 import { SimpleTooltip } from "~/components/primitives/Tooltip";
+import { $replica } from "~/db.server";
 import { useOrganization } from "~/hooks/useOrganizations";
 import { useUser } from "~/hooks/useUser";
-import { getTeamMembersAndInvites, removeTeamMember } from "~/models/member.server";
+import { removeTeamMember } from "~/models/member.server";
 import { redirectWithSuccessMessage } from "~/models/message.server";
+import { TeamPresenter } from "~/presenters/TeamPresenter.server";
 import { requireUserId } from "~/services/session.server";
-import { inviteTeamMemberPath, organizationTeamPath, resendInvitePath } from "~/utils/pathBuilder";
-import { OrgAdminHeader } from "../_app.orgs.$organizationSlug._index/OrgAdminHeader";
-import { DateTime } from "~/components/primitives/DateTime";
+import {
+  inviteTeamMemberPath,
+  organizationTeamPath,
+  resendInvitePath,
+  revokeInvitePath,
+  v3BillingPath,
+} from "~/utils/pathBuilder";
 
-export const loader = async ({ request, params }: LoaderArgs) => {
+const Params = z.object({
+  organizationSlug: z.string(),
+});
+
+export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const userId = await requireUserId(request);
-  const { organizationSlug } = params;
-  invariant(organizationSlug, "organizationSlug not found");
+  const { organizationSlug } = Params.parse(params);
 
-  const result = await getTeamMembersAndInvites({
-    userId,
-    slug: organizationSlug,
+  const organization = await $replica.organization.findFirst({
+    where: { slug: organizationSlug },
+    select: { id: true },
   });
 
-  if (result === null) {
+  if (!organization) {
     throw new Response("Not Found", { status: 404 });
   }
 
-  return typedjson({
-    members: result.members,
-    invites: result.invites,
+  const presenter = new TeamPresenter();
+  const result = await presenter.call({
+    userId,
+    organizationId: organization.id,
   });
+
+  if (!result) {
+    throw new Response("Not Found", { status: 404 });
+  }
+
+  return typedjson(result);
 };
 
 const schema = z.object({
@@ -94,16 +115,46 @@ type Member = UseDataFunctionReturn<typeof loader>["members"][number];
 type Invite = UseDataFunctionReturn<typeof loader>["invites"][number];
 
 export default function Page() {
+  const { members, invites, limits } = useTypedLoaderData<typeof loader>();
   const user = useUser();
-  const { members, invites } = useTypedLoaderData<typeof loader>();
   const organization = useOrganization();
+
+  const requiresUpgrade = limits.used >= limits.limit;
 
   return (
     <PageContainer>
-      <OrgAdminHeader />
+      <NavBar>
+        <PageTitle title="Team" />
+
+        <PageAccessories>
+          <AdminDebugTooltip>
+            <Property.Table>
+              <Property.Item>
+                <Property.Label>Org ID</Property.Label>
+                <Property.Value>{organization.id}</Property.Value>
+              </Property.Item>
+
+              {members.map((member) => (
+                <Property.Item key={member.id}>
+                  <Property.Label>{member.user.name}</Property.Label>
+                  <Property.Value>
+                    <div className="flex items-center gap-2">
+                      <Paragraph variant="extra-small/bright/mono">
+                        {member.user.email} - {member.user.id}
+                      </Paragraph>
+                    </div>
+                  </Property.Value>
+                </Property.Item>
+              ))}
+            </Property.Table>
+          </AdminDebugTooltip>
+        </PageAccessories>
+      </NavBar>
       <PageBody>
-        <Header2>Members</Header2>
-        <ul className="flex w-full max-w-md flex-col divide-y divide-uiBorder border-b border-uiBorder">
+        <Header2>
+          Members ({limits.used}/{limits.limit})
+        </Header2>
+        <ul className="divide-ui-border flex w-full max-w-md flex-col divide-y border-b border-grid-bright">
           {members.map((member) => (
             <li key={member.user.id} className="flex items-center gap-x-4 py-4">
               <UserAvatar
@@ -114,16 +165,11 @@ export default function Page() {
               <div className="flex flex-col gap-0.5">
                 <Header3>
                   {member.user.name}{" "}
-                  {member.user.id === user.id && <span className="text-dimmed">(You)</span>}
+                  {member.user.id === user.id && <span className="text-text-dimmed">(You)</span>}
                 </Header3>
                 <Paragraph variant="small">{member.user.email}</Paragraph>
               </div>
               <div className="flex grow items-center justify-end gap-4">
-                {/* 
-                // This displays Member or Admin but we'll implement this when we implement roles properly
-                <Paragraph variant="extra-small">
-                  {titleCase(member.role.toLocaleLowerCase())}
-                </Paragraph> */}
                 <LeaveRemoveButton userId={user.id} member={member} memberCount={members.length} />
               </div>
             </li>
@@ -133,10 +179,10 @@ export default function Page() {
         {invites.length > 0 && (
           <>
             <Header2 className="mt-4">Pending invites</Header2>
-            <ul className="flex w-full max-w-md flex-col divide-y divide-slate-800 border-b border-slate-800">
+            <ul className="flex w-full max-w-md flex-col divide-y divide-charcoal-800 border-b border-charcoal-800">
               {invites.map((invite) => (
                 <li key={invite.id} className="flex items-center gap-4 py-4">
-                  <div className="rounded-md border border-slate-750 bg-slate-800 p-1.5">
+                  <div className="rounded-md border border-charcoal-750 bg-charcoal-800 p-1.5">
                     <NamedIcon name="envelope" className="h-7 w-7" />
                   </div>
                   <div className="flex flex-col gap-0.5">
@@ -145,8 +191,9 @@ export default function Page() {
                       Invite sent {<DateTime date={invite.updatedAt} />}
                     </Paragraph>
                   </div>
-                  <div className="flex grow items-center justify-end gap-4">
+                  <div className="flex grow items-center justify-end gap-x-2">
                     <ResendButton invite={invite} />
+                    <RevokeButton invite={invite} />
                   </div>
                 </li>
               ))}
@@ -154,15 +201,32 @@ export default function Page() {
           </>
         )}
 
-        <div className="mt-4 flex max-w-md justify-end">
-          <LinkButton
-            to={inviteTeamMemberPath(organization)}
-            variant={"primary/small"}
-            LeadingIcon={UserPlusIcon}
+        {requiresUpgrade ? (
+          <InfoPanel
+            variant="upgrade"
+            icon={LockOpenIcon}
+            iconClassName="text-indigo-500"
+            title="Unlock more team members"
+            to={v3BillingPath(organization)}
+            buttonLabel="Upgrade"
+            panelClassName="mt-4 max-w-sm"
           >
-            Invite a team member
-          </LinkButton>
-        </div>
+            <Paragraph variant="small">
+              You've used all {limits.limit} of your available team members. Upgrade your plan to
+              enable more.
+            </Paragraph>
+          </InfoPanel>
+        ) : (
+          <div className="mt-4 flex max-w-md justify-end">
+            <LinkButton
+              to={inviteTeamMemberPath(organization)}
+              variant={"primary/small"}
+              LeadingIcon={UserPlusIcon}
+            >
+              Invite a team member
+            </LinkButton>
+          </div>
+        )}
       </PageBody>
     </PageContainer>
   );
@@ -184,7 +248,7 @@ function LeaveRemoveButton({
       return (
         <SimpleTooltip
           button={
-            <ButtonContent variant="secondary/small" className="cursor-not-allowed">
+            <ButtonContent variant="minimal/small" className="cursor-not-allowed">
               Leave team
             </ButtonContent>
           }
@@ -235,7 +299,8 @@ function LeaveTeamModal({
 
   const [form, { memberId }] = useForm({
     id: "remove-member",
-    lastSubmission,
+    // TODO: type this
+    lastSubmission: lastSubmission as any,
     onValidate({ formData }) {
       return parse(formData, { schema });
     },
@@ -244,7 +309,7 @@ function LeaveTeamModal({
   return (
     <Alert open={open} onOpenChange={(o) => setOpen(o)}>
       <AlertTrigger asChild>
-        <Button variant="secondary/small">{buttonText}</Button>
+        <Button variant="tertiary/small">{buttonText}</Button>
       </AlertTrigger>
       <AlertContent>
         <AlertHeader>
@@ -269,11 +334,28 @@ function LeaveTeamModal({
 
 function ResendButton({ invite }: { invite: Invite }) {
   return (
-    <Form method="post" action={resendInvitePath()}>
+    <Form method="post" action={resendInvitePath()} className="flex">
       <input type="hidden" value={invite.id} name="inviteId" />
-      <Button type="submit" variant="secondary/small">
+      <Button type="submit" variant="tertiary/small">
         Resend invite
       </Button>
+    </Form>
+  );
+}
+
+function RevokeButton({ invite }: { invite: Invite }) {
+  const organization = useOrganization();
+
+  return (
+    <Form method="post" action={revokeInvitePath()} className="flex">
+      <input type="hidden" value={invite.id} name="inviteId" />
+      <input type="hidden" value={organization.slug} name="slug" />
+      <Button
+        type="submit"
+        variant="danger/small"
+        LeadingIcon="trash-can"
+        leadingIconClassName="text-white"
+      />
     </Form>
   );
 }

@@ -1,13 +1,10 @@
 name: 🤖 PR Checks
 
 on:
-  pull_request_target:
-    branches:
-      - main
+  pull_request:
+    types: [opened, synchronize, reopened]
     paths-ignore:
-      - "**.md"
-      - ".github/CODEOWNERS"
-      - ".github/ISSUE_TEMPLATE/**"
+      - "docs/**"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -28,4 +25,37 @@ jobs:
 
   e2e:
     uses: ./.github/workflows/e2e.yml
+    with:
+      package: cli-v3
     secrets: inherit
+
+  preview-release:
+    name: Preview Release
+    needs: [typecheck, units, e2e]
+    if: github.repository == 'triggerdotdev/trigger.dev'
+    runs-on: buildjet-8vcpu-ubuntu-2204
+    steps:
+      - name: ⬇️ Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: ⎔ Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 8.15.5
+
+      - name: ⎔ Setup node
+        uses: buildjet/setup-node@v4
+        with:
+          node-version: 20.11.1
+          cache: "pnpm"
+
+      - name: 📥 Download deps
+        run: pnpm install --frozen-lockfile
+
+      - name: 🏗️ Build
+        run: pnpm run build --filter "@trigger.dev/*" --filter "trigger.dev"
+
+      - name: ⚡ Publish preview release
+        run: npx pkg-pr-new publish --no-template $(ls -d ./packages/*)

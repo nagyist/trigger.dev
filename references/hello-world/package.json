@@ -1,0 +1,12 @@
+{
+  "name": "references-hello-world",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "trigger.dev": "workspace:*",
+    "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "@trigger.dev/sdk": "workspace:*"
+  }
+}

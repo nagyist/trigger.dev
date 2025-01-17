@@ -2,58 +2,108 @@ import {
   API_VERSIONS,
   ConnectionAuth,
   DeserializedJson,
+  EphemeralEventDispatcherRequestBody,
   ErrorWithStackSchema,
+  FailedRunNotification,
   GetRunOptionsWithTaskDetails,
   GetRunsOptions,
   HandleTriggerSource,
+  HttpEndpointRequestHeadersSchema,
   HttpSourceRequestHeadersSchema,
   HttpSourceResponseMetadata,
   IndexEndpointResponse,
   InitializeTriggerBodySchema,
   IntegrationConfig,
+  InvokeOptions,
   JobMetadata,
-  LogLevel,
-  Logger,
   NormalizedResponse,
   PreprocessRunBody,
   PreprocessRunBodySchema,
   Prettify,
   REGISTER_SOURCE_EVENT_V2,
+  REGISTER_WEBHOOK,
   RegisterSourceEventSchemaV2,
   RegisterSourceEventV2,
   RegisterTriggerBodyV2,
+  RegisterWebhookPayload,
+  RegisterWebhookPayloadSchema,
+  RequestWithRawBodySchema,
   RunJobBody,
   RunJobBodySchema,
+  RunJobErrorResponse,
   RunJobResponse,
+  RunNotification,
   ScheduleMetadata,
   SendEvent,
   SendEventOptions,
   SourceMetadataV2,
   StatusUpdate,
+  SuccessfulRunNotification,
+  WebhookDeliveryResponse,
+  WebhookMetadata,
+  WebhookSourceRequestHeadersSchema,
 } from "@trigger.dev/core";
-import { ApiClient } from "./apiClient";
+import { LogLevel, Logger } from "@trigger.dev/core/logger";
+import EventEmitter from "node:events";
+import { env } from "node:process";
+import { ApiClient } from "./apiClient.js";
+import { ConcurrencyLimit, ConcurrencyLimitOptions } from "./concurrencyLimit.js";
 import {
+  AutoYieldExecutionError,
+  AutoYieldRateLimitError,
+  AutoYieldWithCompletedTaskExecutionError,
   CanceledWithTaskError,
+  ErrorWithTask,
   ParsedPayloadSchemaError,
+  ResumeWithParallelTaskError,
   ResumeWithTaskError,
   RetryWithTaskError,
   YieldExecutionError,
-} from "./errors";
-import { TriggerIntegration } from "./integrations";
-import { IO, IOStats } from "./io";
-import { createIOWithIntegrations } from "./ioWithIntegrations";
-import { Job, JobOptions } from "./job";
-import { runLocalStorage } from "./runLocalStorage";
-import { DynamicTrigger, DynamicTriggerOptions } from "./triggers/dynamic";
-import { EventTrigger } from "./triggers/eventTrigger";
-import { ExternalSource } from "./triggers/externalSource";
-import { DynamicIntervalOptions, DynamicSchedule } from "./triggers/scheduled";
-import type {
-  EventSpecification,
-  Trigger,
-  TriggerContext,
-  TriggerPreprocessContext,
-} from "./types";
+} from "./errors.js";
+import { EndpointOptions, HttpEndpoint, httpEndpoint } from "./httpEndpoint.js";
+import { TriggerIntegration } from "./integrations.js";
+import { IO, IOStats } from "./io.js";
+import { createIOWithIntegrations } from "./ioWithIntegrations.js";
+import { Job, JobOptions } from "./job.js";
+import { runLocalStorage } from "./runLocalStorage.js";
+import { KeyValueStore } from "./store/keyValueStore.js";
+import { DynamicTrigger, DynamicTriggerOptions } from "./triggers/dynamic.js";
+import { EventTrigger } from "./triggers/eventTrigger.js";
+import { ExternalSource } from "./triggers/externalSource.js";
+import { DynamicIntervalOptions, DynamicSchedule } from "./triggers/scheduled.js";
+import { WebhookDeliveryContext, WebhookSource } from "./triggers/webhook.js";
+import {
+  type EventSpecification,
+  type NotificationsEventEmitter,
+  type Trigger,
+  type TriggerContext,
+  type TriggerPreprocessContext,
+  type VerifyResult,
+} from "./types.js";
+import { formatSchemaErrors } from "./utils/formatSchemaErrors.js";
+import { VERSION } from "./version.js";
+
+const parseRequestPayload = (rawPayload: any) => {
+  const result = RequestWithRawBodySchema.safeParse(rawPayload);
+
+  if (!result.success) {
+    throw new ParsedPayloadSchemaError(formatSchemaErrors(result.error.issues));
+  }
+
+  return new Request(new URL(result.data.url), {
+    method: result.data.method,
+    headers: result.data.headers,
+    body: result.data.rawBody,
+  });
+};
+
+const registerWebhookEvent = (key: string): EventSpecification<RegisterWebhookPayload> => ({
+  name: `${REGISTER_WEBHOOK}.${key}`,
+  title: "Register Webhook",
+  source: "internal",
+  icon: "webhook",
+  parsePayload: RegisterWebhookPayloadSchema.parse,
+});
 
 const registerSourceEvent: EventSpecification<RegisterSourceEventV2> = {
   name: REGISTER_SOURCE_EVENT_V2,
@@ -94,11 +144,24 @@ export type TriggerAuthResolver = (
   integration: TriggerIntegration
 ) => Promise<AuthResolverResult | void | undefined>;
 
+type WebhookVerifyFunction = (
+  request: Request,
+  client: TriggerClient,
+  ctx: WebhookDeliveryContext
+) => Promise<VerifyResult>;
+
+type WebhookEventGeneratorFunction = (
+  request: Request,
+  client: TriggerClient,
+  ctx: WebhookDeliveryContext
+) => Promise<void>;
+
 /** A [TriggerClient](https://trigger.dev/docs/documentation/concepts/client-adaptors) is used to connect to a specific [Project](https://trigger.dev/docs/documentation/concepts/projects) by using an [API Key](https://trigger.dev/docs/documentation/concepts/environments-apikeys). */
 export class TriggerClient {
   #options: TriggerClientOptions;
   #registeredJobs: Record<string, Job<Trigger<EventSpecification<any>>, any>> = {};
   #registeredSources: Record<string, SourceMetadataV2> = {};
+  #registeredWebhooks: Record<string, WebhookMetadata> = {};
   #registeredHttpSourceHandlers: Record<
     string,
     (
@@ -110,13 +173,23 @@ export class TriggerClient {
       metadata?: HttpSourceResponseMetadata;
     } | void>
   > = {};
+  #registeredWebhookSourceHandlers: Record<
+    string,
+    {
+      verify: WebhookVerifyFunction;
+      generateEvents: WebhookEventGeneratorFunction;
+    }
+  > = {};
   #registeredDynamicTriggers: Record<
     string,
     DynamicTrigger<EventSpecification<any>, ExternalSource<any, any, any>>
   > = {};
   #jobMetadataByDynamicTriggers: Record<string, Array<{ id: string; version: string }>> = {};
   #registeredSchedules: Record<string, Array<{ id: string; version: string }>> = {};
+  #registeredHttpEndpoints: Record<string, HttpEndpoint<EventSpecification<any>>> = {};
   #authResolvers: Record<string, TriggerAuthResolver> = {};
+  #envStore: KeyValueStore;
+  #eventEmitter: NotificationsEventEmitter = new EventEmitter() as NotificationsEventEmitter;
 
   #client: ApiClient;
   #internalLogger: Logger;
@@ -125,14 +198,24 @@ export class TriggerClient {
   constructor(options: Prettify<TriggerClientOptions>) {
     this.id = options.id;
     this.#options = options;
-    this.#client = new ApiClient(this.#options);
     this.#internalLogger = new Logger("trigger.dev", this.#options.verbose ? "debug" : "log", [
       "output",
       "noopTasksSet",
     ]);
+    this.#client = new ApiClient({
+      logLevel: this.#options.verbose ? "debug" : "log",
+      ...this.#options,
+    });
+
+    this.#envStore = new KeyValueStore(this.#client);
   }
 
-  async handleRequest(request: Request): Promise<NormalizedResponse> {
+  on = this.#eventEmitter.on.bind(this.#eventEmitter);
+
+  async handleRequest(
+    request: Request,
+    timeOrigin: number = performance.now()
+  ): Promise<NormalizedResponse> {
     this.#internalLogger.debug("handling request", {
       url: request.url,
       headers: Object.fromEntries(request.headers.entries()),
@@ -154,7 +237,7 @@ export class TriggerClient {
           body: {
             message: "Unauthorized: client missing apiKey",
           },
-          headers: this.#standardResponseHeaders,
+          headers: this.#standardResponseHeaders(timeOrigin),
         };
       }
       case "missing-header": {
@@ -163,7 +246,7 @@ export class TriggerClient {
           body: {
             message: "Unauthorized: missing x-trigger-api-key header",
           },
-          headers: this.#standardResponseHeaders,
+          headers: this.#standardResponseHeaders(timeOrigin),
         };
       }
       case "unauthorized": {
@@ -172,7 +255,7 @@ export class TriggerClient {
           body: {
             message: `Forbidden: client apiKey mismatch: Make sure you are using the correct API Key for your environment`,
           },
-          headers: this.#standardResponseHeaders,
+          headers: this.#standardResponseHeaders(timeOrigin),
         };
       }
     }
@@ -183,7 +266,7 @@ export class TriggerClient {
         body: {
           message: "Method not allowed (only POST is allowed)",
         },
-        headers: this.#standardResponseHeaders,
+        headers: this.#standardResponseHeaders(timeOrigin),
       };
     }
 
@@ -195,7 +278,7 @@ export class TriggerClient {
         body: {
           message: "Missing x-trigger-action header",
         },
-        headers: this.#standardResponseHeaders,
+        headers: this.#standardResponseHeaders(timeOrigin),
       };
     }
 
@@ -210,7 +293,7 @@ export class TriggerClient {
               ok: false,
               error: "Missing endpoint ID",
             },
-            headers: this.#standardResponseHeaders,
+            headers: this.#standardResponseHeaders(timeOrigin),
           };
         }
 
@@ -221,7 +304,7 @@ export class TriggerClient {
               ok: false,
               error: `Endpoint ID mismatch error. Expected ${this.id}, got ${endpointId}`,
             },
-            headers: this.#standardResponseHeaders,
+            headers: this.#standardResponseHeaders(timeOrigin),
           };
         }
 
@@ -230,13 +313,14 @@ export class TriggerClient {
           body: {
             ok: true,
           },
-          headers: this.#standardResponseHeaders,
+          headers: this.#standardResponseHeaders(timeOrigin),
         };
       }
       case "INDEX_ENDPOINT": {
         const body: IndexEndpointResponse = {
           jobs: this.#buildJobsIndex(),
           sources: Object.values(this.#registeredSources),
+          webhooks: Object.values(this.#registeredWebhooks),
           dynamicTriggers: Object.values(this.#registeredDynamicTriggers).map((trigger) => ({
             id: trigger.id,
             jobs: this.#jobMetadataByDynamicTriggers[trigger.id] ?? [],
@@ -249,13 +333,16 @@ export class TriggerClient {
             id,
             jobs,
           })),
+          httpEndpoints: Object.entries(this.#registeredHttpEndpoints).map(([id, endpoint]) =>
+            endpoint.toJSON()
+          ),
         };
 
         // if the x-trigger-job-id header is not set, we return all jobs
         return {
           status: 200,
           body,
-          headers: this.#standardResponseHeaders,
+          headers: this.#standardResponseHeaders(timeOrigin),
         };
       }
       case "INITIALIZE_TRIGGER": {
@@ -285,7 +372,7 @@ export class TriggerClient {
         return {
           status: 200,
           body: dynamicTrigger.registeredTriggerForParams(body.data.params),
-          headers: this.#standardResponseHeaders,
+          headers: this.#standardResponseHeaders(timeOrigin),
         };
       }
       case "EXECUTE_JOB": {
@@ -312,12 +399,23 @@ export class TriggerClient {
           };
         }
 
-        const results = await this.#executeJob(execution.data, job, triggerVersion);
+        const results = await this.#executeJob(execution.data, job, timeOrigin, triggerVersion);
+
+        this.#internalLogger.debug("executed job", {
+          results,
+          job: job.id,
+          version: job.version,
+          triggerVersion,
+        });
+
+        const standardHeaders = this.#standardResponseHeaders(timeOrigin);
+
+        standardHeaders["x-trigger-run-metadata"] = this.#serializeRunMetadata(job);
 
         return {
           status: 200,
           body: results,
-          headers: this.#standardResponseHeaders,
+          headers: standardHeaders,
         };
       }
       case "PREPROCESS_RUN": {
@@ -352,7 +450,7 @@ export class TriggerClient {
             abort: results.abort,
             properties: results.properties,
           },
-          headers: this.#standardResponseHeaders,
+          headers: this.#standardResponseHeaders(timeOrigin),
         };
       }
       case "DELIVER_HTTP_SOURCE_REQUEST": {
@@ -418,7 +516,110 @@ export class TriggerClient {
             response,
             metadata,
           },
-          headers: this.#standardResponseHeaders,
+          headers: this.#standardResponseHeaders(timeOrigin),
+        };
+      }
+      case "DELIVER_HTTP_ENDPOINT_REQUEST_FOR_RESPONSE": {
+        const headers = HttpEndpointRequestHeadersSchema.safeParse(
+          Object.fromEntries(request.headers.entries())
+        );
+
+        if (!headers.success) {
+          return {
+            status: 400,
+            body: {
+              message: "Invalid headers",
+            },
+          };
+        }
+
+        const sourceRequestNeedsBody = headers.data["x-ts-http-method"] !== "GET";
+
+        const sourceRequestInit: RequestInit = {
+          method: headers.data["x-ts-http-method"],
+          headers: headers.data["x-ts-http-headers"],
+          body: sourceRequestNeedsBody ? request.body : undefined,
+        };
+
+        if (sourceRequestNeedsBody) {
+          try {
+            // @ts-ignore
+            sourceRequestInit.duplex = "half";
+          } catch (error) {
+            // ignore
+          }
+        }
+
+        const sourceRequest = new Request(headers.data["x-ts-http-url"], sourceRequestInit);
+
+        const key = headers.data["x-ts-key"];
+
+        const { response } = await this.#handleHttpEndpointRequestForResponse(
+          {
+            key,
+          },
+          sourceRequest
+        );
+
+        return {
+          status: 200,
+          body: response,
+          headers: this.#standardResponseHeaders(timeOrigin),
+        };
+      }
+      case "DELIVER_WEBHOOK_REQUEST": {
+        const headers = WebhookSourceRequestHeadersSchema.safeParse(
+          Object.fromEntries(request.headers.entries())
+        );
+
+        if (!headers.success) {
+          return {
+            status: 400,
+            body: {
+              message: "Invalid headers",
+            },
+          };
+        }
+
+        const sourceRequestNeedsBody = headers.data["x-ts-http-method"] !== "GET";
+
+        const sourceRequestInit: RequestInit = {
+          method: headers.data["x-ts-http-method"],
+          headers: headers.data["x-ts-http-headers"],
+          body: sourceRequestNeedsBody ? request.body : undefined,
+        };
+
+        if (sourceRequestNeedsBody) {
+          try {
+            // @ts-ignore
+            sourceRequestInit.duplex = "half";
+          } catch (error) {
+            // ignore
+          }
+        }
+
+        const webhookRequest = new Request(headers.data["x-ts-http-url"], sourceRequestInit);
+
+        const key = headers.data["x-ts-key"];
+        const secret = headers.data["x-ts-secret"];
+        const params = headers.data["x-ts-params"];
+
+        const ctx = {
+          key,
+          secret,
+          params,
+        };
+
+        const { response, verified, error } = await this.#handleWebhookRequest(webhookRequest, ctx);
+
+        return {
+          status: 200,
+          body: {
+            response,
+            verified,
+            error,
+          },
+          headers: this.#standardResponseHeaders(timeOrigin),
         };
       }
       case "VALIDATE": {
@@ -428,7 +629,40 @@ export class TriggerClient {
             ok: true,
             endpointId: this.id,
           },
-          headers: this.#standardResponseHeaders,
+          headers: this.#standardResponseHeaders(timeOrigin),
+        };
+      }
+      case "PROBE_EXECUTION_TIMEOUT": {
+        const json = await request.json();
+        // Keep this request open for max 15 minutes so the server can detect when the function execution limit is exceeded
+        const timeout = json?.timeout ?? 15 * 60 * 1000;
+
+        await new Promise((resolve) => setTimeout(resolve, timeout));
+
+        return {
+          status: 200,
+          body: {
+            ok: true,
+          },
+          headers: this.#standardResponseHeaders(timeOrigin),
+        };
+      }
+      case "RUN_NOTIFICATION": {
+        const rawJson = await request.json();
+        const runNotification = rawJson as RunNotification<any>;
+
+        if (runNotification.ok) {
+          await this.#deliverSuccessfulRunNotification(runNotification);
+        } else {
+          await this.#deliverFailedRunNotification(runNotification);
+        }
+
+        return {
+          status: 200,
+          body: {
+            ok: true,
+          },
+          headers: this.#standardResponseHeaders(timeOrigin),
         };
       }
     }
@@ -438,15 +672,28 @@ export class TriggerClient {
       body: {
         message: "Method not allowed",
       },
-      headers: this.#standardResponseHeaders,
+      headers: this.#standardResponseHeaders(timeOrigin),
     };
   }
 
   defineJob<
     TTrigger extends Trigger<EventSpecification<any>>,
     TIntegrations extends Record<string, TriggerIntegration> = {},
-  >(options: JobOptions<TTrigger, TIntegrations>) {
-    return new Job<TTrigger, TIntegrations>(this, options);
+    TOutput extends any = any,
+  >(options: JobOptions<TTrigger, TIntegrations, TOutput>) {
+    const existingRegisteredJob = this.#registeredJobs[options.id];
+
+    if (existingRegisteredJob && options.__internal !== true) {
+      console.warn(
+        `[@trigger.dev/sdk] Warning: The Job "${existingRegisteredJob.id}" you're attempting to define has already been defined. Please assign a different ID to the job.`
+      );
+    }
+
+    const job = new Job<TTrigger, TIntegrations, TOutput>(options);
+
+    this.attach(job);
+
+    return job;
   }
 
   defineAuthResolver(
@@ -471,10 +718,33 @@ export class TriggerClient {
     return new DynamicTrigger(this, options);
   }
 
+  /**
+   * An [HTTP endpoint](https://trigger.dev/docs/documentation/concepts/http-endpoints) allows you to create a [HTTP Trigger](https://trigger.dev/docs/documentation/concepts/triggers/http), which means you can trigger your Jobs from any webhooks.
+   * @param options The Endpoint options
+   * @returns An HTTP Endpoint, that can be used to create an HTTP Trigger.
+   * @link https://trigger.dev/docs/documentation/concepts/http-endpoints
+   */
+  defineHttpEndpoint(options: EndpointOptions, suppressWarnings = false) {
+    const existingHttpEndpoint = this.#registeredHttpEndpoints[options.id];
+    if (!suppressWarnings && existingHttpEndpoint) {
+      console.warn(
+        `[@trigger.dev/sdk] Warning: The HttpEndpoint "${existingHttpEndpoint.id}" you're attempting to define has already been defined. Please assign a different ID to the HttpEndpoint.`
+      );
+    }
+
+    const endpoint = httpEndpoint(options);
+    this.#registeredHttpEndpoints[endpoint.id] = endpoint;
+    return endpoint;
+  }
+
+  defineConcurrencyLimit(options: ConcurrencyLimitOptions) {
+    return new ConcurrencyLimit(options);
+  }
+
   attach(job: Job<Trigger<any>, any>): void {
     this.#registeredJobs[job.id] = job;
-
     job.trigger.attachToJob(this, job);
+    job.client = this;
   }
 
   attachDynamicTrigger(trigger: DynamicTrigger<any, any>): void {
@@ -559,7 +829,7 @@ export class TriggerClient {
 
     this.#registeredSources[options.key] = registeredSource;
 
-    new Job(this, {
+    this.defineJob({
       id: options.key,
       name: options.key,
       version: options.source.version,
@@ -601,8 +871,136 @@ export class TriggerClient {
     this.#registeredSchedules[key] = jobs;
   }
 
-  async registerTrigger(id: string, key: string, options: RegisterTriggerBodyV2) {
-    return this.#client.registerTrigger(this.id, id, key, options);
+  attachWebhook<
+    TIntegration extends TriggerIntegration,
+    TParams extends any,
+    TConfig extends Record<string, string[]>,
+  >(options: {
+    key: string;
+    source: WebhookSource<TIntegration, TParams, TConfig>;
+    event: EventSpecification<any>;
+    params: any;
+    config: TConfig;
+  }): void {
+    const { source } = options;
+
+    this.#registeredWebhookSourceHandlers[options.key] = {
+      verify: source.verify.bind(source),
+      generateEvents: source.generateEvents.bind(source),
+    };
+
+    let registeredWebhook = this.#registeredWebhooks[options.key];
+
+    if (!registeredWebhook) {
+      registeredWebhook = {
+        key: options.key,
+        params: options.params,
+        config: options.config,
+        integration: {
+          id: source.integration.id,
+          metadata: source.integration.metadata,
+          authSource: source.integration.authSource,
+        },
+        httpEndpoint: {
+          id: options.key,
+        },
+      };
+    } else {
+      registeredWebhook.config = deepMergeOptions(registeredWebhook.config, options.config);
+    }
+
+    this.#registeredWebhooks[options.key] = registeredWebhook;
+
+    this.defineJob({
+      id: `webhook.register.${options.key}`,
+      name: `webhook.register.${options.key}`,
+      version: source.version,
+      trigger: new EventTrigger({
+        event: registerWebhookEvent(options.key),
+      }),
+      integrations: {
+        integration: source.integration,
+      },
+      run: async (registerPayload, io, ctx) => {
+        return await io.try(
+          async () => {
+            this.#internalLogger.debug("[webhook.register] Start");
+
+            const crudOptions = {
+              io,
+              // this is just a more strongly typed payload
+              ctx: registerPayload as Parameters<(typeof source)["crud"]["create"]>[0]["ctx"],
+            };
+
+            if (!registerPayload.active) {
+              this.#internalLogger.debug("[webhook.register] Not active, run create");
+
+              await io.try(
+                async () => {
+                  await source.crud.create(crudOptions);
+                },
+                async (error) => {
+                  this.#internalLogger.debug(
+                    "[webhook.register] Error during create, re-trying with delete first",
+                    { error }
+                  );
+
+                  await io.runTask("create-retry", async () => {
+                    await source.crud.delete(crudOptions);
+                    await source.crud.create(crudOptions);
+                  });
+                }
+              );
+
+              return await io.updateWebhook("update-webhook-success", {
+                key: options.key,
+                active: true,
+                config: registerPayload.config.desired,
+              });
+            }
+
+            this.#internalLogger.debug("[webhook.register] Already active, run update");
+
+            if (source.crud.update) {
+              await source.crud.update(crudOptions);
+            } else {
+              this.#internalLogger.debug(
+                "[webhook.register] Run delete and create instead of update"
+              );
+
+              await source.crud.delete(crudOptions);
+              await source.crud.create(crudOptions);
+            }
+
+            return await io.updateWebhook("update-webhook-success", {
+              key: options.key,
+              active: true,
+              config: registerPayload.config.desired,
+            });
+          },
+          async (error) => {
+            this.#internalLogger.debug("[webhook.register] Error", { error });
+
+            await io.updateWebhook("update-webhook-error", {
+              key: options.key,
+              active: false,
+            });
+
+            throw error;
+          }
+        );
+      },
+      __internal: true,
+    });
+  }
+
+  async registerTrigger(
+    id: string,
+    key: string,
+    options: RegisterTriggerBodyV2,
+    idempotencyKey?: string
+  ) {
+    return this.#client.registerTrigger(this.id, id, key, options, idempotencyKey);
   }
 
   async getAuth(id: string) {
@@ -618,8 +1016,21 @@ export class TriggerClient {
     return this.#client.sendEvent(event, options);
   }
 
+  /** You can call this function from anywhere in your backend to send multiple events. The other way to send multiple events is by using [`io.sendEvents()`](https://trigger.dev/docs/sdk/io/sendevents) from inside a `run()` function.
+   * @param events The events to send.
+   * @param options Options for sending the events.
+   * @returns A promise that resolves to an array of event details
+   */
+  async sendEvents(events: SendEvent[], options?: SendEventOptions) {
+    return this.#client.sendEvents(events, options);
+  }
+
   async cancelEvent(eventId: string) {
     return this.#client.cancelEvent(eventId);
+  }
+
+  async cancelRunsForEvent(eventId: string) {
+    return this.#client.cancelRunsForEvent(eventId);
   }
 
   async updateStatus(runId: string, id: string, status: StatusUpdate) {
@@ -654,6 +1065,24 @@ export class TriggerClient {
     return this.#client.getRunStatuses(runId);
   }
 
+  async invokeJob(jobId: string, payload: any, options?: InvokeOptions) {
+    return this.#client.invokeJob(jobId, payload, options);
+  }
+
+  async cancelRunsForJob(jobId: string) {
+    return this.#client.cancelRunsForJob(jobId);
+  }
+
+  async createEphemeralEventDispatcher(payload: EphemeralEventDispatcherRequestBody) {
+    return this.#client.createEphemeralEventDispatcher(payload);
+  }
+
+  get store() {
+    return {
+      env: this.#envStore,
+    };
+  }
+
   authorized(
     apiKey?: string | null
   ): "authorized" | "unauthorized" | "missing-client" | "missing-header" {
@@ -661,7 +1090,7 @@ export class TriggerClient {
       return "missing-header";
     }
 
-    const localApiKey = this.#options.apiKey ?? process.env.TRIGGER_API_KEY;
+    const localApiKey = this.#options.apiKey ?? env.TRIGGER_API_KEY;
 
     if (!localApiKey) {
       return "missing-client";
@@ -671,7 +1100,7 @@ export class TriggerClient {
   }
 
   apiKey() {
-    return this.#options.apiKey ?? process.env.TRIGGER_API_KEY;
+    return this.#options.apiKey ?? env.TRIGGER_API_KEY;
   }
 
   async #preprocessRun(body: PreprocessRunBody, job: Job<Trigger<EventSpecification<any>>, any>) {
@@ -690,6 +1119,7 @@ export class TriggerClient {
   async #executeJob(
     body: RunJobBody,
     job: Job<Trigger<any>, Record<string, TriggerIntegration>>,
+    timeOrigin: number,
     triggerVersion: string | null
   ): Promise<RunJobResponse> {
     this.#internalLogger.debug("executing job", {
@@ -703,6 +1133,7 @@ export class TriggerClient {
 
     const io = new IO({
       id: body.run.id,
+      jobId: job.id,
       cachedTasks: body.tasks,
       cachedTasksCursor: body.cachedTaskCursor,
       yieldedExecutions: body.yieldedExecutions ?? [],
@@ -716,6 +1147,8 @@ export class TriggerClient {
         ? new Logger(job.id, job.logLevel ?? this.#options.logLevel ?? "info")
         : undefined,
       serverVersion: triggerVersion,
+      timeOrigin,
+      executionTimeout: body.runChunkExecutionLimit,
     });
 
     const resolvedConnections = await this.#resolveConnections(
@@ -738,12 +1171,20 @@ export class TriggerClient {
     );
 
     try {
+      const parsedPayload = job.trigger.event.parsePayload(body.event.payload ?? {});
+
+      if (!context.run.isTest) {
+        const verified = await job.trigger.verifyPayload(parsedPayload);
+        if (!verified.success) {
+          return {
+            status: "ERROR",
+            error: { message: `Payload verification failed. ${verified.reason}` },
+          };
+        }
+      }
+
       const output = await runLocalStorage.runWith({ io, ctx: context }, () => {
-        return job.options.run(
-          job.trigger.event.parsePayload(body.event.payload ?? {}),
-          ioWithConnections,
-          context
-        );
+        return job.options.run(parsedPayload, ioWithConnections, context);
       });
 
       if (this.#options.verbose) {
@@ -756,67 +1197,131 @@ export class TriggerClient {
         this.#logIOStats(io.stats);
       }
 
-      if (error instanceof YieldExecutionError) {
-        return { status: "YIELD_EXECUTION", key: error.key };
-      }
-
-      if (error instanceof ParsedPayloadSchemaError) {
-        return { status: "INVALID_PAYLOAD", errors: error.schemaErrors };
-      }
-
-      if (error instanceof ResumeWithTaskError) {
-        return { status: "RESUME_WITH_TASK", task: error.task };
-      }
-
-      if (error instanceof RetryWithTaskError) {
+      if (error instanceof ResumeWithParallelTaskError) {
         return {
-          status: "RETRY_WITH_TASK",
+          status: "RESUME_WITH_PARALLEL_TASK",
           task: error.task,
-          error: error.cause,
-          retryAt: error.retryAt,
+          childErrors: error.childErrors.map((childError) => {
+            return this.#convertErrorToExecutionResponse(childError, body);
+          }),
         };
       }
 
-      if (error instanceof CanceledWithTaskError) {
-        return {
-          status: "CANCELED",
-          task: error.task,
-        };
-      }
+      return this.#convertErrorToExecutionResponse(error, body);
+    }
+  }
 
-      if (error instanceof RetryWithTaskError) {
-        const errorWithStack = ErrorWithStackSchema.safeParse(error.cause);
+  #convertErrorToExecutionResponse(error: any, body: RunJobBody): RunJobErrorResponse {
+    if (error instanceof AutoYieldExecutionError) {
+      return {
+        status: "AUTO_YIELD_EXECUTION",
+        location: error.location,
+        timeRemaining: error.timeRemaining,
+        timeElapsed: error.timeElapsed,
+        limit: body.runChunkExecutionLimit,
+      };
+    }
 
-        if (errorWithStack.success) {
-          return {
-            status: "ERROR",
-            error: errorWithStack.data,
-            task: error.task,
-          };
-        }
+    if (error instanceof AutoYieldWithCompletedTaskExecutionError) {
+      return {
+        status: "AUTO_YIELD_EXECUTION_WITH_COMPLETED_TASK",
+        id: error.id,
+        properties: error.properties,
+        output: error.output,
+        data: {
+          ...error.data,
+          limit: body.runChunkExecutionLimit,
+        },
+      };
+    }
 
-        return {
-          status: "ERROR",
-          error: { message: "Unknown error" },
-          task: error.task,
-        };
-      }
+    if (error instanceof AutoYieldRateLimitError) {
+      return {
+        status: "AUTO_YIELD_RATE_LIMIT",
+        reset: error.resetAtTimestamp,
+      };
+    }
 
-      const errorWithStack = ErrorWithStackSchema.safeParse(error);
+    if (error instanceof YieldExecutionError) {
+      return { status: "YIELD_EXECUTION", key: error.key };
+    }
+
+    if (error instanceof ParsedPayloadSchemaError) {
+      return { status: "INVALID_PAYLOAD", errors: error.schemaErrors };
+    }
+
+    if (error instanceof ResumeWithTaskError) {
+      return { status: "RESUME_WITH_TASK", task: error.task };
+    }
+
+    if (error instanceof RetryWithTaskError) {
+      return {
+        status: "RETRY_WITH_TASK",
+        task: error.task,
+        error: error.cause,
+        retryAt: error.retryAt,
+      };
+    }
+
+    if (error instanceof CanceledWithTaskError) {
+      return {
+        status: "CANCELED",
+        task: error.task,
+      };
+    }
+
+    if (error instanceof ErrorWithTask) {
+      const errorWithStack = ErrorWithStackSchema.safeParse(error.cause.output);
 
       if (errorWithStack.success) {
-        return { status: "ERROR", error: errorWithStack.data };
+        return {
+          status: "ERROR",
+          error: errorWithStack.data,
+          task: error.cause,
+        };
+      }
+
+      return {
+        status: "ERROR",
+        error: { message: JSON.stringify(error.cause.output) },
+        task: error.cause,
+      };
+    }
+
+    if (error instanceof RetryWithTaskError) {
+      const errorWithStack = ErrorWithStackSchema.safeParse(error.cause);
+
+      if (errorWithStack.success) {
+        return {
+          status: "ERROR",
+          error: errorWithStack.data,
+          task: error.task,
+        };
       }
 
       return {
         status: "ERROR",
         error: { message: "Unknown error" },
+        task: error.task,
       };
     }
+
+    const errorWithStack = ErrorWithStackSchema.safeParse(error);
+
+    if (errorWithStack.success) {
+      return { status: "ERROR", error: errorWithStack.data };
+    }
+
+    const message = typeof error === "string" ? error : JSON.stringify(error);
+
+    return {
+      status: "ERROR",
+      error: { name: "Unknown error", message },
+    };
   }
 
   #createRunContext(execution: RunJobBody): TriggerContext {
-    const { event, organization, environment, job, run, source } = execution;
+    const { event, organization, project, environment, job, run, source } = execution;
 
     return {
       event: {
@@ -826,6 +1331,7 @@ export class TriggerClient {
         timestamp: event.timestamp,
       },
       organization,
+      project: project ?? { id: "unknown", name: "unknown", slug: "unknown" }, // backwards compat with old servers
       environment,
       job,
       run,
@@ -965,6 +1471,127 @@ export class TriggerClient {
     };
   }
 
+  async #handleHttpEndpointRequestForResponse(
+    data: {
+      key: string;
+    },
+    sourceRequest: Request
+  ): Promise<{
+    response: NormalizedResponse;
+  }> {
+    this.#internalLogger.debug("Handling HTTP Endpoint request for response", {
+      data,
+    });
+
+    const httpEndpoint = this.#registeredHttpEndpoints[data.key];
+    if (!httpEndpoint) {
+      this.#internalLogger.debug("No handler registered for HTTP Endpoint", {
+        data,
+      });
+
+      return {
+        response: {
+          status: 200,
+          body: {
+            ok: true,
+          },
+        },
+      };
+    }
+
+    const handledResponse = await httpEndpoint.handleRequest(sourceRequest);
+
+    if (!handledResponse) {
+      this.#internalLogger.debug("There's no HTTP Endpoint respondWith.handler()", {
+        data,
+      });
+      return {
+        response: {
+          status: 200,
+          body: {
+            ok: true,
+          },
+        },
+      };
+    }
+
+    let body: string | undefined;
+    try {
+      body = await handledResponse.text();
+    } catch (error) {
+      this.#internalLogger.error(
+        `Error reading httpEndpoint ${httpEndpoint.id} respondWith.handler Response`,
+        {
+          error,
+        }
+      );
+    }
+
+    const response = {
+      status: handledResponse.status,
+      headers: handledResponse.headers
+        ? Object.fromEntries(handledResponse.headers.entries())
+        : undefined,
+      body,
+    };
+
+    this.#internalLogger.info(`httpEndpoint ${httpEndpoint.id} respondWith.handler response`, {
+      response,
+    });
+
+    return {
+      response,
+    };
+  }
+
+  async #handleWebhookRequest(
+    request: Request,
+    ctx: WebhookDeliveryContext
+  ): Promise<WebhookDeliveryResponse> {
+    this.#internalLogger.debug("Handling webhook request", {
+      ctx,
+    });
+
+    const okResponse = {
+      status: 200,
+      body: {
+        ok: true,
+      },
+    };
+
+    const handlers = this.#registeredWebhookSourceHandlers[ctx.key];
+
+    if (!handlers) {
+      this.#internalLogger.debug("No handler registered for webhook", {
+        ctx,
+      });
+
+      return {
+        response: okResponse,
+        verified: false,
+      };
+    }
+
+    const { verify, generateEvents } = handlers;
+
+    const verifyResult = await verify(request, this, ctx);
+
+    if (!verifyResult.success) {
+      return {
+        response: okResponse,
+        verified: false,
+        error: verifyResult.reason,
+      };
+    }
+
+    await generateEvents(request, this, ctx);
+
+    return {
+      response: okResponse,
+      verified: true,
+    };
+  }
+
   async #resolveConnections(
     ctx: TriggerContext,
     integrations?: Record<string, TriggerIntegration>,
@@ -982,7 +1609,7 @@ export class TriggerClient {
         const integration = integrations[key];
         const auth = (connections ?? {})[key];
 
-        const result = await this.#resolveConnection(ctx, integration, auth);
+        const result = await this.#resolveConnection(ctx, integration!, auth);
 
         if (result.ok) {
           return {
@@ -1022,7 +1649,7 @@ export class TriggerClient {
 
             const integration = integrations[result.key];
 
-            acc[result.key] = { id: integration.id, error: result.error };
+            acc[result.key] = { id: integration!.id, error: result.error };
 
             return acc;
           },
@@ -1122,6 +1749,12 @@ export class TriggerClient {
       enabled: job.enabled,
       preprocessRuns: job.trigger.preprocessRuns,
       internal,
+      concurrencyLimit:
+        typeof job.options.concurrencyLimit === "number"
+          ? job.options.concurrencyLimit
+          : typeof job.options.concurrencyLimit === "object"
+          ? { id: job.options.concurrencyLimit.id, limit: job.options.concurrencyLimit.limit }
+          : undefined,
     };
   }
 
@@ -1132,7 +1765,7 @@ export class TriggerClient {
       (acc: Record<string, IntegrationConfig>, key) => {
         const integration = job.options.integrations![key];
 
-        acc[key] = this.#buildJobIntegration(integration);
+        acc[key] = this.#buildJobIntegration(integration!);
 
         return acc;
       },
@@ -1158,10 +1791,68 @@ export class TriggerClient {
     });
   }
 
-  get #standardResponseHeaders() {
+  #standardResponseHeaders(start: number): Record<string, string> {
     return {
       "Trigger-Version": API_VERSIONS.LAZY_LOADED_CACHED_TASKS,
+      "Trigger-SDK-Version": VERSION,
+      "X-Trigger-Request-Timing": `dur=${performance.now() - start / 1000.0}`,
     };
+  }
+
+  #serializeRunMetadata(job: Job<Trigger<EventSpecification<any>>, any>) {
+    const metadata: Record<string, any> = {};
+
+    if (
+      this.#eventEmitter.listenerCount("runSucceeeded") > 0 ||
+      typeof job.options.onSuccess === "function"
+    ) {
+      metadata["successSubscription"] = true;
+    }
+
+    if (
+      this.#eventEmitter.listenerCount("runFailed") > 0 ||
+      typeof job.options.onFailure === "function"
+    ) {
+      metadata["failedSubscription"] = true;
+    }
+
+    return JSON.stringify(metadata);
+  }
+
+  async #deliverSuccessfulRunNotification(notification: SuccessfulRunNotification<any>) {
+    this.#internalLogger.debug("delivering successful run notification", {
+      notification,
+    });
+
+    this.#eventEmitter.emit("runSucceeeded", notification);
+
+    const job = this.#registeredJobs[notification.job.id];
+
+    if (!job) {
+      return;
+    }
+
+    if (typeof job.options.onSuccess === "function") {
+      await job.options.onSuccess(notification);
+    }
+  }
+
+  async #deliverFailedRunNotification(notification: FailedRunNotification) {
+    this.#internalLogger.debug("delivering failed run notification", {
+      notification,
+    });
+
+    this.#eventEmitter.emit("runFailed", notification);
+
+    const job = this.#registeredJobs[notification.job.id];
+
+    if (!job) {
+      return;
+    }
+
+    if (typeof job.options.onFailure === "function") {
+      await job.options.onFailure(notification);
+    }
   }
 }
 
@@ -1177,8 +1868,10 @@ function deepMergeOptions(obj1: Options, obj2: Options): Options {
   for (const key in obj2) {
     if (obj2.hasOwnProperty(key)) {
       if (key in mergedOptions) {
+        // @ts-expect-error
         mergedOptions[key] = [...mergedOptions[key], ...obj2[key]];
       } else {
+        // @ts-expect-error
         mergedOptions[key] = obj2[key];
       }
     }

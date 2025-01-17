@@ -34,6 +34,7 @@ type DetailCellProps = {
   description?: string | React.ReactNode;
   className?: string;
   variant?: keyof typeof variations;
+  boxClassName?: string;
 };
 
 export function DetailCell({
@@ -45,37 +46,28 @@ export function DetailCell({
   description,
   className,
   variant = "small",
+  boxClassName,
 }: DetailCellProps) {
   const variation = variations[variant];
 
   return (
-    <div
-      className={cn(
-        "group flex h-11 w-full items-center gap-3 rounded-md p-1 pr-3 transition hover:bg-slate-900",
-        className
-      )}
-    >
+    <div className={cn("group flex h-11 w-full items-center gap-3 rounded-md p-1 pr-3", className)}>
       <IconInBox
         icon={leadingIcon}
-        className={cn("flex-none transition group-hover:border-slate-750", leadingIconClassName)}
+        className={cn("flex-none transition group-hover:border-charcoal-750", leadingIconClassName)}
+        boxClassName={boxClassName}
       />
       <div className="flex flex-1 flex-col">
         <Paragraph
           variant={variation.label.variant}
-          className={cn(
-            "flex-1 text-left transition group-hover:text-bright",
-            variation.label.className
-          )}
+          className={cn("flex-1 text-left", variation.label.className)}
         >
           {label}
         </Paragraph>
         {description && (
           <Paragraph
             variant={variation.description.variant}
-            className={cn(
-              "flex-1 text-left text-dimmed transition group-hover:text-bright",
-              variation.description.className
-            )}
+            className={cn("flex-1 text-left text-text-dimmed", variation.description.className)}
           >
             {description}
           </Paragraph>
@@ -85,7 +77,7 @@ export function DetailCell({
         <Icon
           icon={trailingIcon}
           className={cn(
-            "h-6 w-6 flex-none transition group-hover:border-slate-750",
+            "h-6 w-6 flex-none transition group-hover:border-charcoal-750",
             trailingIconClassName
           )}
         />

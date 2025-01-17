@@ -5,14 +5,28 @@ type DateTimeProps = {
   date: Date | string;
   timeZone?: string;
   includeSeconds?: boolean;
+  includeTime?: boolean;
+  showTimezone?: boolean;
 };
 
-export const DateTime = ({ date, timeZone = "UTC", includeSeconds = true }: DateTimeProps) => {
+export const DateTime = ({
+  date,
+  timeZone,
+  includeSeconds = true,
+  includeTime = true,
+  showTimezone = false,
+}: DateTimeProps) => {
   const locales = useLocales();
 
   const realDate = typeof date === "string" ? new Date(date) : date;
 
-  const initialFormattedDateTime = formatDateTime(realDate, timeZone, locales, includeSeconds);
+  const initialFormattedDateTime = formatDateTime(
+    realDate,
+    timeZone ?? "UTC",
+    locales,
+    includeSeconds,
+    includeTime
+  );
 
   const [formattedDateTime, setFormattedDateTime] = useState<string>(initialFormattedDateTime);
 
@@ -20,26 +34,38 @@ export const DateTime = ({ date, timeZone = "UTC", includeSeconds = true }: Date
     const resolvedOptions = Intl.DateTimeFormat().resolvedOptions();
 
     setFormattedDateTime(
-      formatDateTime(realDate, resolvedOptions.timeZone, locales, includeSeconds)
+      formatDateTime(
+        realDate,
+        timeZone ?? resolvedOptions.timeZone,
+        locales,
+        includeSeconds,
+        includeTime
+      )
     );
   }, [locales, includeSeconds, realDate]);
 
-  return <Fragment>{formattedDateTime.replace(/\s/g, String.fromCharCode(32))}</Fragment>;
+  return (
+    <Fragment>
+      {formattedDateTime.replace(/\s/g, String.fromCharCode(32))}
+      {showTimezone ? ` (${timeZone ?? "UTC"})` : null}
+    </Fragment>
+  );
 };
 
-function formatDateTime(
+export function formatDateTime(
   date: Date,
   timeZone: string,
   locales: string[],
-  includeSeconds: boolean
+  includeSeconds: boolean,
+  includeTime: boolean
 ): string {
   return new Intl.DateTimeFormat(locales, {
     year: "numeric",
     month: "short",
     day: "numeric",
-    hour: "numeric",
-    minute: "numeric",
-    second: includeSeconds ? "numeric" : undefined,
+    hour: includeTime ? "numeric" : undefined,
+    minute: includeTime ? "numeric" : undefined,
+    second: includeTime && includeSeconds ? "numeric" : undefined,
     timeZone,
   }).format(date);
 }
@@ -64,7 +90,6 @@ export const DateTimeAccurate = ({ date, timeZone = "UTC" }: DateTimeProps) => {
 
 function formatDateTimeAccurate(date: Date, timeZone: string, locales: string[]): string {
   const formattedDateTime = new Intl.DateTimeFormat(locales, {
-    year: "numeric",
     month: "short",
     day: "numeric",
     hour: "numeric",

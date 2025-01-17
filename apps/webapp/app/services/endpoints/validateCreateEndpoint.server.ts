@@ -5,7 +5,7 @@ import { AuthenticatedEnvironment } from "../apiAuth.server";
 import { workerQueue } from "../worker.server";
 import { CreateEndpointError } from "./createEndpoint.server";
 import { EndpointApi } from "../endpointApi.server";
-import { RuntimeEnvironmentType } from "@trigger.dev/database";
+import { RuntimeEnvironmentType } from "~/database-types";
 
 const indexingHookIdentifier = customAlphabet("0123456789abcdefghijklmnopqrstuvxyz", 10);
 
@@ -66,12 +66,15 @@ export class ValidateCreateEndpointService {
           },
         });
 
-        // Kick off process to fetch the jobs for this endpoint
+        const index = await tx.endpointIndex.create({
+          data: { endpointId: endpoint.id, status: "PENDING", source: "INTERNAL" },
+        });
+
+        // Kick off process to fetch the jobs for this index
         await workerQueue.enqueue(
-          "indexEndpoint",
+          "performEndpointIndexing",
           {
-            id: endpoint.id,
-            source: "INTERNAL",
+            id: index.id,
           },
           {
             tx,

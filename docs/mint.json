@@ -1,6 +1,16 @@
 {
   "$schema": "https://mintlify.com/schema.json",
   "name": "Trigger.dev",
+  "openapi": [
+    "/openapi.yml",
+    "/v3-openapi.yaml"
+  ],
+  "api": {
+    "playground": {
+      "mode": "simple"
+    },
+    "maintainOrder": true
+  },
   "logo": {
     "dark": "/logo/dark.png",
     "light": "/logo/light.png",
@@ -8,15 +18,19 @@
   },
   "favicon": "/images/favicon.png",
   "colors": {
-    "primary": "#818cf8",
-    "light": "#818cf8",
-    "dark": "#818cf8",
+    "primary": "#A8FF53",
+    "light": "#A8FF53",
+    "dark": "#A8FF53",
     "anchors": {
-      "from": "#fff",
-      "to": "#eee"
+      "from": "#252630",
+      "to": "#252630"
+    },
+    "background": {
+      "light": "#fff",
+      "dark": "#121317"
     }
   },
-  "backgroundImage": "/images/docs-background.png",
+  "theme": "quill",
   "modeToggle": {
     "default": "dark",
     "isHidden": true
@@ -32,336 +46,386 @@
   },
   "topbarLinks": [
     {
-      "name": "Community",
-      "url": "https://discord.gg/kA47vcd8P6"
-    }
-  ],
-  "tabs": [
-    {
-      "name": "Integrations",
-      "url": "integrations"
+      "name": "Switch to v2 docs",
+      "url": "https://v2docs.trigger.dev/documentation/introduction"
     },
     {
-      "name": "Reference",
-      "url": "sdk"
-    },
-    {
-      "name": "Example Jobs",
-      "url": "examples"
+      "name": "Discord",
+      "url": "https://trigger.dev/discord"
     }
   ],
   "redirects": [
     {
-      "source": "/documentation/quickstart",
-      "destination": "/documentation/quickstarts/introduction"
+      "source": "/v3/feature-matrix",
+      "destination": "https://feedback.trigger.dev/roadmap"
     },
     {
-      "source": "/documentation/guides/manual",
-      "destination": "/documentation/guides/manual/nextjs"
+      "source": "/v3/upgrading-from-v2",
+      "destination": "/guides/use-cases/upgrading-from-v2"
+    },
+    {
+      "source": "/v3/open-source-self-hosting",
+      "destination": "/open-source-self-hosting"
+    },
+    {
+      "source": "/v3/:slug*",
+      "destination": "/:slug*"
+    },
+    {
+      "source": "/reattempting-replaying",
+      "destination": "/replaying"
+    },
+    {
+      "source": "/tasks-overview",
+      "destination": "/tasks/overview"
+    },
+    {
+      "source": "/tasks-scheduled",
+      "destination": "/tasks/scheduled"
+    },
+    {
+      "source": "/trigger-folder",
+      "destination": "/config/config-file"
+    },
+    {
+      "source": "/trigger-config",
+      "destination": "/config/config-file"
+    },
+    {
+      "source": "/guides/frameworks/introduction",
+      "destination": "/guides/introduction"
+    },
+    {
+      "source": "/guides/examples/intro",
+      "destination": "/guides/introduction"
+    },
+    {
+      "source": "/examples/:slug*",
+      "destination": "/guides/examples/:slug*"
+    },
+    {
+      "source": "/realtime",
+      "destination": "/realtime/overview"
+    },
+    {
+      "source": "/runs-and-attempts",
+      "destination": "/runs"
+    },
+    {
+      "source": "/frontend/react-hooks",
+      "destination": "/frontend/react-hooks/overview"
+    }
+  ],
+  "anchors": [
+    {
+      "name": "Guides & examples",
+      "icon": "book",
+      "url": "guides"
     }
   ],
   "navigation": [
     {
       "group": "Getting Started",
       "pages": [
-        "documentation/introduction",
-        {
-          "group": "Quick Starts",
-          "pages": [
-            "documentation/quickstarts/introduction",
-            {
-              "group": "Frameworks",
-              "pages": [
-                "documentation/quickstarts/nextjs",
-                "documentation/quickstarts/express",
-                "documentation/quickstarts/remix",
-                "documentation/quickstarts/redwood",
-                "documentation/quickstarts/nestjs",
-                "documentation/quickstarts/astro",
-                "documentation/quickstarts/nuxt",
-                "documentation/quickstarts/sveltekit",
-                "documentation/quickstarts/fastify"
-              ]
-            },
-            "documentation/quickstarts/supabase"
-          ]
-        },
-        "documentation/guides/create-a-job",
-        "documentation/guides/video-walkthrough"
+        "introduction",
+        "quick-start",
+        "video-walkthrough",
+        "how-it-works",
+        "limits"
       ]
     },
     {
-      "group": "Concepts",
-      "pages": [
-        "documentation/concepts/what-is-triggerdotdev",
-        "documentation/concepts/limitations",
-        "documentation/concepts/projects",
-        "documentation/concepts/client-adaptors",
-        {
-          "group": "Jobs, Runs & Tasks",
-          "pages": [
-            "documentation/concepts/jobs",
-            "documentation/concepts/runs",
-            "documentation/concepts/tasks"
-          ]
-        },
-        {
-          "group": "Triggers",
-          "pages": [
-            "documentation/concepts/triggers/introduction",
-            "documentation/concepts/triggers/webhooks",
-            "documentation/concepts/triggers/events",
-            "documentation/concepts/triggers/scheduled",
-            "documentation/concepts/triggers/dynamic"
-          ]
-        },
-        "documentation/concepts/resumability",
-        "documentation/concepts/delays",
-        "documentation/concepts/integrations",
-        "documentation/concepts/connect",
-        "documentation/concepts/environments-endpoints"
-      ]
-    },
-    {
-      "group": "Guides",
+      "group": "Fundamentals",
       "pages": [
         {
-          "group": "Platforms",
+          "group": "Tasks",
           "pages": [
-            "documentation/guides/platforms/nextjs",
-            "documentation/guides/platforms/express",
-            "documentation/guides/platforms/remix",
-            "documentation/guides/platforms/redwood",
-            "documentation/guides/platforms/astro",
-            "documentation/guides/platforms/nuxt",
-            "documentation/guides/platforms/sveltekit",
-            "documentation/guides/platforms/fastify"
+            "tasks/overview",
+            "tasks/schemaTask",
+            "tasks/scheduled"
           ]
         },
-        "documentation/guides/cli",
+        "triggering",
+        "runs",
+        "apikeys",
         {
-          "group": "Manual setup",
+          "group": "Configuration",
           "pages": [
-            "documentation/guides/manual/nextjs",
-            "documentation/guides/manual/nestjs",
-            "documentation/guides/manual/express",
-            "documentation/guides/manual/remix",
-            "documentation/guides/manual/redwood",
-            "documentation/guides/manual/astro",
-            "documentation/guides/manual/nuxt",
-            "documentation/guides/manual/sveltekit",
-            "documentation/guides/manual/fastify"
-          ]
-        },
-        "documentation/guides/running-jobs",
-        "documentation/guides/jobs/managing",
-        {
-          "group": "Using the Dashboard",
-          "pages": [
-            "documentation/guides/managing-jobs",
-            "documentation/guides/viewing-runs",
-            "documentation/guides/testing-jobs",
-            "documentation/guides/rerunning"
-          ]
-        },
-        {
-          "group": "Using Integrations",
-          "pages": [
-            "documentation/guides/using-integrations",
-            "documentation/guides/using-integrations-apikeys",
-            "documentation/guides/using-integrations-oauth",
-            "documentation/guides/using-integrations-byo-auth"
-          ]
-        },
-        {
-          "group": "React hooks",
-          "pages": [
-            "documentation/guides/react-hooks",
-            "documentation/guides/react-hooks-automatic",
-            "documentation/guides/react-hooks-statuses"
-          ]
-        },
-        {
-          "group": "Deployment",
-          "pages": [
-            "documentation/guides/deployment",
-            "documentation/guides/deployment-setup",
-            "documentation/guides/deployment-manual",
-            "documentation/guides/deployment-automatic"
-          ]
-        },
-        "documentation/guides/event-filter",
-        "documentation/guides/zod",
-        {
-          "group": "Self hosting",
-          "pages": [
-            "documentation/guides/self-hosting",
-            "documentation/guides/self-hosting/flyio",
-            "documentation/guides/self-hosting/render",
-            "documentation/guides/self-hosting/supabase",
-            "documentation/guides/tunneling-platform"
-          ]
-        },
-        "documentation/guides/contributing"
-      ]
-    },
-    {
-      "group": "Community & Support",
-      "pages": [
-        "documentation/get-help",
-        "documentation/faq",
-        "documentation/changelog",
-        "documentation/roadmap"
-      ]
-    },
-    {
-      "group": "Overview",
-      "pages": [
-        "integrations/introduction",
-        {
-          "group": "Create an Integration",
-          "pages": [
-            "integrations/create",
-            "integrations/create-setup",
-            "integrations/create-anatomy",
-            "integrations/create-oauth",
-            "integrations/create-client",
-            "integrations/create-tasks",
-            "integrations/create-triggers",
-            "integrations/create-testing",
-            "integrations/create-publishing"
+            "config/config-file",
+            "config/extensions/overview"
           ]
         }
       ]
     },
     {
-      "group": "Integrations",
+      "group": "Development",
       "pages": [
-        "integrations/apis/airtable",
+        "cli-dev",
+        "run-tests"
+      ]
+    },
+    {
+      "group": "Deployment",
+      "pages": [
+        "cli-deploy",
+        "deploy-environment-variables",
+        "github-actions",
         {
-          "group": "GitHub",
+          "group": "Deployment integrations",
           "pages": [
-            "integrations/apis/github",
-            "integrations/apis/github-triggers",
-            "integrations/apis/github-tasks"
+            "vercel-integration"
+          ]
+        }
+      ]
+    },
+    {
+      "group": "Writing tasks",
+      "pages": [
+        "writing-tasks-introduction",
+        "logging",
+        "errors-retrying",
+        {
+          "group": "Wait",
+          "pages": [
+            "wait",
+            "wait-for",
+            "wait-until",
+            "wait-for-event",
+            "wait-for-request"
           ]
         },
-        "integrations/apis/linear",
-        "integrations/apis/openai",
-        "integrations/apis/plain",
-        "integrations/apis/replicate",
-        "integrations/apis/resend",
-        "integrations/apis/sendgrid",
-        "integrations/apis/slack",
-        "integrations/apis/stripe",
+        "queue-concurrency",
+        "versioning",
+        "machines",
+        "idempotency",
+        "replaying",
+        "runs/max-duration",
+        "tags",
+        "runs/metadata",
+        "run-usage",
+        "context"
+      ]
+    },
+    {
+      "group": "Frontend usage",
+      "pages": [
+        "frontend/overview",
+        {
+          "group": "React hooks",
+          "pages": [
+            "frontend/react-hooks/overview",
+            "frontend/react-hooks/realtime",
+            "frontend/react-hooks/triggering"
+          ]
+        }
+      ]
+    },
+    {
+      "group": "Realtime API",
+      "pages": [
+        "realtime/overview",
+        "realtime/streams",
+        "realtime/react-hooks",
+        "realtime/subscribe-to-run",
+        "realtime/subscribe-to-runs-with-tag",
+        "realtime/subscribe-to-batch"
+      ]
+    },
+    {
+      "group": "API reference",
+      "pages": [
+        "management/overview",
+        {
+          "group": "Tasks API",
+          "pages": [
+            "management/tasks/trigger",
+            "management/tasks/batch-trigger"
+          ]
+        },
+        {
+          "group": "Runs API",
+          "pages": [
+            "management/runs/list",
+            "management/runs/retrieve",
+            "management/runs/replay",
+            "management/runs/cancel",
+            "management/runs/reschedule",
+            "management/runs/update-metadata"
+          ]
+        },
+        {
+          "group": "Schedules API",
+          "pages": [
+            "management/schedules/list",
+            "management/schedules/create",
+            "management/schedules/retrieve",
+            "management/schedules/update",
+            "management/schedules/delete",
+            "management/schedules/deactivate",
+            "management/schedules/activate",
+            "management/schedules/timezones"
+          ]
+        },
+        {
+          "group": "Env Vars API",
+          "pages": [
+            "management/envvars/list",
+            "management/envvars/import",
+            "management/envvars/create",
+            "management/envvars/retrieve",
+            "management/envvars/update",
+            "management/envvars/delete"
+          ]
+        },
+        {
+          "group": "Projects API",
+          "pages": [
+            "management/projects/runs"
+          ]
+        }
+      ]
+    },
+    {
+      "group": "CLI",
+      "pages": [
+        "cli-introduction",
+        {
+          "group": "Commands",
+          "pages": [
+            "cli-login-commands",
+            "cli-init-commands",
+            "cli-dev-commands",
+            "cli-deploy-commands",
+            "cli-whoami-commands",
+            "cli-logout-commands",
+            "cli-list-profiles-commands",
+            "cli-update-commands"
+          ]
+        }
+      ]
+    },
+    {
+      "group": "Open source",
+      "pages": [
+        "open-source-self-hosting",
+        "open-source-contributing",
+        "github-repo",
+        "changelog",
+        "roadmap"
+      ]
+    },
+    {
+      "group": "Troubleshooting",
+      "pages": [
+        "troubleshooting",
+        "upgrading-packages",
+        "upgrading-beta",
+        "troubleshooting-alerts",
+        "troubleshooting-uptime-status",
+        "troubleshooting-github-issues",
+        "request-feature"
+      ]
+    },
+    {
+      "group": "Help",
+      "pages": [
+        "community",
+        "help-slack",
+        "help-email"
+      ]
+    },
+    {
+      "group": "",
+      "pages": [
+        "guides/introduction"
+      ]
+    },
+    {
+      "group": "Frameworks",
+      "pages": [
+        "guides/frameworks/bun",
+        "guides/frameworks/nextjs",
+        "guides/frameworks/nodejs",
+        "guides/frameworks/remix"
+      ]
+    },
+    {
+      "group": "Guides",
+      "pages": [
+        "guides/frameworks/prisma",
+        "guides/frameworks/drizzle",
+        "guides/frameworks/sequin",
         {
           "group": "Supabase",
+          "icon": "bolt",
+          "iconType": "solid",
           "pages": [
-            "integrations/apis/supabase/introduction",
-            "integrations/apis/supabase/management",
-            "integrations/apis/supabase/client"
+            "guides/frameworks/supabase-guides-overview",
+            "guides/frameworks/supabase-edge-functions-basic",
+            "guides/frameworks/supabase-edge-functions-database-webhooks"
           ]
         },
-        "integrations/apis/typeform"
+        {
+          "group": "Webhooks",
+          "icon": "webhook",
+          "iconType": "solid",
+          "pages": [
+            "guides/frameworks/webhooks-guides-overview",
+            "guides/frameworks/nextjs-webhooks",
+            "guides/frameworks/remix-webhooks",
+            "guides/examples/stripe-webhook"
+          ]
+        }
       ]
     },
     {
-      "group": "SDK",
+      "group": "Example projects",
       "pages": [
-        "sdk/introduction",
-        {
-          "group": "TriggerClient",
-          "pages": [
-            "sdk/triggerclient/overview",
-            "sdk/triggerclient/constructor",
-            {
-              "group": "Instance methods",
-              "pages": [
-                "sdk/triggerclient/instancemethods/sendevent",
-                "sdk/triggerclient/instancemethods/getevent",
-                "sdk/triggerclient/instancemethods/cancel-event",
-                "sdk/triggerclient/instancemethods/getruns",
-                "sdk/triggerclient/instancemethods/getrun",
-                "sdk/triggerclient/instancemethods/define-job",
-                "sdk/triggerclient/instancemethods/define-dynamic-trigger",
-                "sdk/triggerclient/instancemethods/define-dynamic-schedule",
-                "sdk/triggerclient/instancemethods/define-auth-resolver"
-              ]
-            }
-          ]
-        },
-        "sdk/job",
-        {
-          "group": "IO",
-          "pages": [
-            "sdk/io/overview",
-            "sdk/io/logger",
-            "sdk/io/wait",
-            "sdk/io/sendevent",
-            "sdk/io/runtask",
-            "sdk/io/try",
-            "sdk/io/backgroundfetch",
-            "sdk/io/registerinterval",
-            "sdk/io/unregisterinterval",
-            "sdk/io/registercron",
-            "sdk/io/unregistercron",
-            "sdk/io/registertrigger"
-          ]
-        },
-        "sdk/context",
-        "sdk/eventtrigger",
-        "sdk/crontrigger",
-        "sdk/intervaltrigger",
-        {
-          "group": "DynamicTrigger",
-          "pages": [
-            "sdk/dynamictrigger/overview",
-            "sdk/dynamictrigger/constructor",
-            {
-              "group": "Instance methods",
-              "pages": ["sdk/dynamictrigger/register", "sdk/dynamictrigger/unregister"]
-            }
-          ]
-        },
-        {
-          "group": "DynamicSchedule",
-          "pages": [
-            "sdk/dynamicschedule/overview",
-            "sdk/dynamicschedule/constructor",
-            {
-              "group": "Instance methods",
-              "pages": ["sdk/dynamicschedule/register", "sdk/dynamicschedule/unregister"]
-            }
-          ]
-        },
-        "sdk/connection-auth",
-        "sdk/istriggererror",
-        "sdk/redactstring"
+        "guides/example-projects/realtime-fal-ai",
+        "guides/example-projects/batch-llm-evaluator",
+        "guides/example-projects/realtime-csv-importer"
       ]
     },
     {
-      "group": "React SDK",
+      "group": "Example tasks",
       "pages": [
-        "sdk/react/introduction",
-        "sdk/react/triggerprovider",
-        "sdk/react/useeventdetails",
-        "sdk/react/useeventrundetails",
-        "sdk/react/userundetails"
+        "guides/examples/dall-e3-generate-image",
+        "guides/examples/deepgram-transcribe-audio",
+        "guides/examples/fal-ai-image-to-cartoon",
+        "guides/examples/fal-ai-realtime",
+        "guides/examples/ffmpeg-video-processing",
+        "guides/examples/firecrawl-url-crawl",
+        "guides/examples/libreoffice-pdf-conversion",
+        "guides/examples/open-ai-with-retrying",
+        "guides/examples/pdf-to-image",
+        "guides/examples/puppeteer",
+        "guides/examples/scrape-hacker-news",
+        "guides/examples/sentry-error-tracking",
+        "guides/examples/sharp-image-processing",
+        "guides/examples/supabase-database-operations",
+        "guides/examples/supabase-storage-upload",
+        "guides/examples/react-pdf",
+        "guides/examples/resend-email-sequence",
+        "guides/examples/vercel-ai-sdk",
+        "guides/examples/vercel-sync-env-vars"
       ]
     },
     {
-      "group": "Overview",
-      "pages": ["examples/introduction"]
+      "group": "Dashboard",
+      "pages": [
+        "guides/dashboard/creating-a-project"
+      ]
+    },
+    {
+      "group": "Migrations",
+      "pages": [
+        "guides/use-cases/upgrading-from-v2"
+      ]
     }
   ],
   "footerSocials": {
     "twitter": "https://twitter.com/triggerdotdev",
     "github": "https://github.com/triggerdotdev",
     "linkedin": "https://www.linkedin.com/company/triggerdotdev"
-  },
-  "analytics": {
-    "posthog": {
-      "apiKey": "phc_hwYmedO564b3Ik8nhA4Csrb5SueY0EwFJWCbseGwWW"
-    }
   }
 }

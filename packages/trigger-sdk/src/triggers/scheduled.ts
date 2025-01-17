@@ -7,11 +7,11 @@ import {
   TriggerMetadata,
   currentDate,
 } from "@trigger.dev/core";
-import { Job } from "../job";
-import { TriggerClient } from "../triggerClient";
-import { EventSpecification, Trigger } from "../types";
+import { Job } from "../job.js";
+import { TriggerClient } from "../triggerClient.js";
+import { EventSpecification, Trigger } from "../types.js";
 import cronstrue from "cronstrue";
-import { runLocalStorage } from "../runLocalStorage";
+import { runLocalStorage } from "../runLocalStorage.js";
 
 type ScheduledEventSpecification = EventSpecification<ScheduledPayload>;
 
@@ -56,6 +56,10 @@ export class IntervalTrigger implements Trigger<ScheduledEventSpecification> {
     return false;
   }
 
+  async verifyPayload(payload: ReturnType<ScheduledEventSpecification["parsePayload"]>) {
+    return { success: true as const };
+  }
+
   toJSON(): TriggerMetadata {
     return {
       type: "scheduled",
@@ -80,9 +84,15 @@ export class CronTrigger implements Trigger<ScheduledEventSpecification> {
   constructor(private options: CronOptions) {}
 
   get event() {
-    const humanReadable = cronstrue.toString(this.options.cron, {
-      throwExceptionOnParseError: false,
-    });
+    /**
+     * We need to concat `(UTC)` string at the end of the human readable string to avoid confusion
+     * with execution time/last run of a job in the UI dashboard which is displayed in local time.
+     */
+    const humanReadable = cronstrue
+      .toString(this.options.cron, {
+        throwExceptionOnParseError: false,
+      })
+      .concat(" (UTC)");
 
     return {
       name: "trigger.scheduled",
@@ -111,6 +121,10 @@ export class CronTrigger implements Trigger<ScheduledEventSpecification> {
 
   get preprocessRuns() {
     return false;
+  }
+
+  async verifyPayload(payload: ReturnType<ScheduledEventSpecification["parsePayload"]>) {
+    return { success: true as const };
   }
 
   toJSON(): TriggerMetadata {
@@ -226,6 +240,10 @@ export class DynamicSchedule implements Trigger<ScheduledEventSpecification> {
 
   get preprocessRuns() {
     return false;
+  }
+
+  async verifyPayload(payload: ReturnType<ScheduledEventSpecification["parsePayload"]>) {
+    return { success: true as const };
   }
 
   toJSON(): TriggerMetadata {

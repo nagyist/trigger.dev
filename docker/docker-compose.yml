@@ -2,7 +2,9 @@ version: "3"
 
 volumes:
   database-data:
+  database-data-alt:
   pgadmin-data:
+  redis-data:
 
 networks:
   app_network:
@@ -11,10 +13,12 @@ networks:
 services:
   database:
     container_name: database
-    image: postgres:14
+    build:
+      context: .
+      dockerfile: Dockerfile.postgres
     restart: always
     volumes:
-      - database-data:/var/lib/postgresql/data/
+      - ${DB_VOLUME:-database-data}:/var/lib/postgresql/data/
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
@@ -23,10 +27,17 @@ services:
       - app_network
     ports:
       - 5432:5432
+    command:
+      - -c
+      - listen_addresses=*
+      - -c
+      - wal_level=logical
+      - -c
+      - shared_preload_libraries=pg_partman_bgw
 
   pgadmin:
     container_name: pgadmin
-    image: dpage/pgadmin4:7
+    image: dpage/pgadmin4:8
     restart: always
     environment:
       PGADMIN_DEFAULT_EMAIL: admin@example.com
@@ -41,3 +52,39 @@ services:
       - 5480:80
     depends_on:
       - database
+
+  redis:
+    container_name: redis
+    image: redis:7
+    restart: always
+    volumes:
+      - redis-data:/data
+    networks:
+      - app_network
+    ports:
+      - 6379:6379
+
+  electric:
+    image: electricsql/electric:1.0.0-beta.1@sha256:2262f6f09caf5fa45f233731af97b84999128170a9529e5f9b9b53642308493f
+    restart: always
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@database:5432/postgres?sslmode=disable
+    networks:
+      - app_network
+    ports:
+      - "3060:3000"
+    depends_on:
+      - database
+
+  # otel-collector:
+  #   container_name: otel-collector
+  #   image: otel/opentelemetry-collector-contrib:latest
+  #   restart: always
+  #   command: ["--config", "/etc/otel-collector-config.yaml"]
+  #   volumes:
+  #     - ./otel-collector-config.yaml:/etc/otel-collector-config.yaml
+  #   ports:
+  #     - "55680:55680"
+  #     - "55681:55681"
+  #     - "4317:4317" # OTLP gRPC receiver
+  #     - "4318:4318" # OTLP http receiver
